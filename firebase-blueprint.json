@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "Process": {
+      "title": "Process",
+      "description": "Financiamento Imobiliário e Correspondente Bancário process",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientCpf": { "type": "string" },
+        "clientPhone": { "type": "string" },
+        "bank": { "type": "string" },
+        "creditType": { "type": "string" },
+        "propertyValue": { "type": "number" },
+        "financingValue": { "type": "number" },
+        "downPaymentValue": { "type": "number" },
+        "termMonths": { "type": "number" },
+        "interestRateAnnual": { "type": "number" },
+        "amortizationSystem": { "type": "string" },
+        "commissionPercentage": { "type": "number" },
+        "commissionValue": { "type": "number" },
+        "estimatedIssuanceMonth": { "type": "string" },
+        "commissionStatus": { "type": "string" },
+        "stage": { "type": "string" },
+        "stageUpdatedAt": { "type": "string" }
+      },
+      "required": ["id", "clientName", "bank", "financingValue", "stage"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Authenticated user profile for CRM access",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/processes/{processId}": {
+      "schema": "Process",
+      "description": "Shared CRM financing processes"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    }
+  }
+}
