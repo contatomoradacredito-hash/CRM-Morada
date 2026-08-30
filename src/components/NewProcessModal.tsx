@@ -11,7 +11,7 @@ import {
   Layers,
   MapPin,
 } from 'lucide-react';
-import { BankPartner, ClientProcess, CreditType, PriorityLevel, ProcessStage } from '../types';
+import { BankPartner, ClientProcess, CreditAnalysisStatus, CreditType, PriorityLevel, ProcessStage } from '../types';
 import { BANK_CONFIGS, CREDIT_TYPE_LABELS, getFullDefaultChecklist } from '../utils/constants';
 import { formatCurrency } from '../utils/formatters';
 
@@ -69,6 +69,9 @@ export const NewProcessModal: React.FC<NewProcessModalProps> = ({
   );
   const [priority, setPriority] = useState<PriorityLevel>(initialData?.priority || 'NORMAL');
   const [initialStage, setInitialStage] = useState<ProcessStage>(initialData?.stage || 'SIMULATION_COLLECTION');
+  const [creditAnalysisStatus, setCreditAnalysisStatus] = useState<CreditAnalysisStatus>(
+    initialData?.creditAnalysisStatus || (initialData?.stage && initialData.stage !== 'SIMULATION_COLLECTION' && initialData.stage !== 'CREDIT_ANALYSIS' ? 'APROVADO' : 'EM_ANALISE')
+  );
 
   // Handle bank change to auto update default commission
   const handleBankSelect = (newBank: BankPartner) => {
@@ -140,6 +143,7 @@ export const NewProcessModal: React.FC<NewProcessModalProps> = ({
       stageUpdatedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       priority,
+      creditAnalysisStatus: initialStage === 'SIMULATION_COLLECTION' ? 'EM_ANALISE' : creditAnalysisStatus,
 
       notes: [
         {
@@ -433,27 +437,75 @@ export const NewProcessModal: React.FC<NewProcessModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Fase Atual no CRM</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Fase Inicial no CRM</label>
                 <select
                   value={initialStage}
-                  onChange={(e) => setInitialStage(e.target.value as ProcessStage)}
+                  onChange={(e) => {
+                    const newStg = e.target.value as ProcessStage;
+                    setInitialStage(newStg);
+                    if (newStg !== 'SIMULATION_COLLECTION' && newStg !== 'CREDIT_ANALYSIS') {
+                      setCreditAnalysisStatus('APROVADO');
+                    }
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900"
                 >
-                  <optgroup label="Etapas Iniciais (Novos de Setembro)">
-                    <option value="SIMULATION_COLLECTION">1. Simulação & Coleta</option>
+                  <optgroup label="Etapas Iniciais">
+                    <option value="SIMULATION_COLLECTION">1. Simulação</option>
                     <option value="CREDIT_ANALYSIS">2. Análise de Crédito</option>
                     <option value="PROPERTY_VALUATION">3. Engenharia & Vistoria</option>
-                    <option value="LEGAL_COMPLIANCE">4. Análise Jurídica</option>
+                    <option value="LEGAL_COMPLIANCE">4. Análise Jurídica / Dossiê</option>
+                    <option value="VALUE_CONFIRMATION">5. Confirmação de Valores</option>
                   </optgroup>
-                  <optgroup label="Etapas Finais (Em Andamento / Agosto)">
-                    <option value="CONTRACT_ISSUANCE">5. Emissão de Contrato</option>
-                    <option value="CONTRACT_SIGNATURE">6. Assinatura</option>
-                    <option value="PROPERTY_REGISTRY">7. Cartório / RGI</option>
-                    <option value="DISBURSEMENT_COMPLETED">8. Recursos Liberados</option>
-                    <option value="COMMISSION_PAID">9. Concluído & Comissionado</option>
+                  <optgroup label="Etapas Finais">
+                    <option value="CONTRACT_ISSUANCE">6. Emissão de Contrato</option>
+                    <option value="CONTRACT_SIGNATURE">7. Assinatura</option>
+                    <option value="PROPERTY_REGISTRY">8. Cartório / RGI</option>
+                    <option value="DISBURSEMENT_COMPLETED">9. Recursos Liberados</option>
+                    <option value="COMMISSION_PAID">10. Concluído & Comissionado</option>
                   </optgroup>
                 </select>
               </div>
+
+              {initialStage === 'CREDIT_ANALYSIS' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Substatus da Análise de Crédito</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setCreditAnalysisStatus('EM_ANALISE')}
+                      className={`py-1.5 px-2 text-xs font-bold rounded-lg border transition ${
+                        creditAnalysisStatus === 'EM_ANALISE'
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Em Análise
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCreditAnalysisStatus('APROVADO')}
+                      className={`py-1.5 px-2 text-xs font-bold rounded-lg border transition ${
+                        creditAnalysisStatus === 'APROVADO'
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Aprovado
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCreditAnalysisStatus('RECUSADO')}
+                      className={`py-1.5 px-2 text-xs font-bold rounded-lg border transition ${
+                        creditAnalysisStatus === 'RECUSADO'
+                          ? 'bg-rose-600 text-white border-rose-700 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Recusado
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">

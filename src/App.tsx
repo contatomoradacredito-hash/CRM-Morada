@@ -1,11 +1,11 @@
 /**
- * Morada Crédito Imobiliário - CRM
+ * Morada Crédito Imobiliário
  * Correspondente Bancário | Financiamento Imobiliário
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import confetti from 'canvas-confetti';
-import { ClientProcess, CreditType, ProcessStage } from './types';
+import { ClientProcess, CreditAnalysisStatus, CreditType, ProcessStage } from './types';
 import { INITIAL_PROCESSES } from './data/defaultData';
 import {
   exportProcessesToCSV,
@@ -25,7 +25,7 @@ import { ProcessDetailModal } from './components/ProcessDetailModal';
 import { NewProcessModal } from './components/NewProcessModal';
 import { DataManagementModal } from './components/DataManagementModal';
 import { LoginScreen } from './components/LoginScreen';
-import { STAGE_CONFIGS } from './utils/constants';
+import { CREDIT_ANALYSIS_STATUS_CONFIGS, STAGE_CONFIGS } from './utils/constants';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import {
   syncProcessesToFirestore,
@@ -135,6 +135,40 @@ function CRMApp() {
     showToast(`Processo atualizado para ${STAGE_CONFIGS[nextStage]?.shortLabel || nextStage}`);
   };
 
+  const handleUpdateCreditStatus = (processId: string, status: CreditAnalysisStatus) => {
+    let updatedProcess: ClientProcess | null = null;
+    setProcesses((prev) => {
+      const updated = prev.map((p) => {
+        if (p.id === processId) {
+          const historyEntry = {
+            id: `sh_cs_${Date.now()}`,
+            fromStage: p.stage,
+            toStage: p.stage,
+            changedAt: new Date().toISOString(),
+            note: `Status de Análise de Crédito alterado para ${CREDIT_ANALYSIS_STATUS_CONFIGS[status]?.label || status}`,
+          };
+          const procUpdated: ClientProcess = {
+            ...p,
+            creditAnalysisStatus: status,
+            creditApprovedAt: status === 'APROVADO' ? (p.creditApprovedAt || new Date().toISOString()) : p.creditApprovedAt,
+            stageUpdatedAt: new Date().toISOString(),
+            stageHistory: [historyEntry, ...(p.stageHistory || [])],
+          };
+          updatedProcess = procUpdated;
+          return procUpdated;
+        }
+        return p;
+      });
+      saveProcesses(updated);
+      return updated;
+    });
+
+    if (updatedProcess) {
+      saveProcessToFirestore(updatedProcess);
+    }
+    showToast(`Análise de crédito atualizada para: ${CREDIT_ANALYSIS_STATUS_CONFIGS[status]?.label || status}`);
+  };
+
   const handleSaveProcess = (updatedProc: ClientProcess) => {
     setProcesses((prev) => {
       const list = prev.map((p) => (p.id === updatedProc.id ? updatedProc : p));
@@ -209,7 +243,7 @@ function CRMApp() {
         <div className="w-14 h-14 rounded-2xl bg-emerald-600 flex items-center justify-center shadow-2xl animate-pulse">
           <Building2 className="w-7 h-7 text-white" />
         </div>
-        <p className="text-sm font-semibold text-slate-300">Carregando Morada Crédito CRM...</p>
+        <p className="text-sm font-semibold text-slate-300">Carregando Morada Crédito Imobiliário...</p>
       </div>
     );
   }
@@ -249,8 +283,8 @@ function CRMApp() {
         processes={processes}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5">
+      {/* Main Content Area - Wide Full Canvas */}
+      <main className="flex-1 max-w-[1780px] w-full mx-auto px-3 sm:px-6 lg:px-8 py-4">
         {/* Executive KPI Stats on top */}
         <HeaderStats processes={processes} selectedMonth={selectedMonth} />
 
@@ -260,6 +294,7 @@ function CRMApp() {
             processes={processes}
             onSelectProcess={(proc) => setSelectedProcessForModal(proc)}
             onAdvanceStage={handleAdvanceStage}
+            onUpdateCreditStatus={handleUpdateCreditStatus}
             onOpenNewProcess={() => {
               setNewProcessInitialData(undefined);
               setIsNewProcessModalOpen(true);

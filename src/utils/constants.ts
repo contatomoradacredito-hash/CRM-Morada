@@ -1,4 +1,4 @@
-import { BankCommissionRule, BankPartner, CreditType, ProcessChecklistItem, ProcessStage } from '../types';
+import { BankCommissionRule, BankPartner, CreditAnalysisStatus, CreditType, ProcessChecklistItem, ProcessStage } from '../types';
 
 export interface StageConfig {
   id: ProcessStage;
@@ -18,9 +18,9 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
   SIMULATION_COLLECTION: {
     id: 'SIMULATION_COLLECTION',
     order: 1,
-    label: '1. Simulação & Coleta',
+    label: '1. Simulação',
     shortLabel: 'Simulação',
-    description: 'Simulação de taxas, coleta de documentos básicos do cliente e formulação da proposta.',
+    description: 'Simulação de taxas, formulação da proposta e alinhamento dos cenários de crédito.',
     badgeColor: 'bg-amber-100 text-amber-800 border-amber-300',
     borderColor: 'border-amber-400',
     textColor: 'text-amber-700',
@@ -32,8 +32,8 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
     id: 'CREDIT_ANALYSIS',
     order: 2,
     label: '2. Análise de Crédito',
-    shortLabel: 'Análise Banco',
-    description: 'Fichas enviadas aos bancos parceiros; aguardando parecer e condicionantes da aprovação.',
+    shortLabel: 'Análise de Crédito',
+    description: 'Fichas enviadas aos bancos parceiros com substatus: Em Análise, Aprovado ou Recusado.',
     badgeColor: 'bg-blue-100 text-blue-800 border-blue-300',
     borderColor: 'border-blue-400',
     textColor: 'text-blue-700',
@@ -67,10 +67,23 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
     bgLight: 'bg-purple-50/70',
     iconName: 'FileCheck2',
   },
+  VALUE_CONFIRMATION: {
+    id: 'VALUE_CONFIRMATION',
+    order: 5,
+    label: '5. Confirmação de Valores',
+    shortLabel: 'Confirmação de Valores',
+    description: 'Revisão e ajuste final dos valores da operação, prazo de financiamento, taxa de juros e parcelas antes de solicitar a emissão da minuta contratual.',
+    badgeColor: 'bg-amber-100 text-amber-900 border-amber-300',
+    borderColor: 'border-amber-500',
+    textColor: 'text-amber-800',
+    bgColor: 'bg-amber-600',
+    bgLight: 'bg-amber-50/70',
+    iconName: 'SlidersHorizontal',
+  },
   CONTRACT_ISSUANCE: {
     id: 'CONTRACT_ISSUANCE',
-    order: 5,
-    label: '5. Emissão de Contrato',
+    order: 6,
+    label: '6. Emissão de Contrato',
     shortLabel: 'Emissão Contrato',
     description: 'Minuta gerada e validação final do banco para envio da via física ou assinatura digital.',
     badgeColor: 'bg-cyan-100 text-cyan-800 border-cyan-300',
@@ -82,8 +95,8 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
   },
   CONTRACT_SIGNATURE: {
     id: 'CONTRACT_SIGNATURE',
-    order: 6,
-    label: '6. Assinatura do Contrato',
+    order: 7,
+    label: '7. Assinatura do Contrato',
     shortLabel: 'Assinaturas',
     description: 'Assinatura presencial ou digital pelo Comprador, Cônjuge, Vendedor e Instituição.',
     badgeColor: 'bg-teal-100 text-teal-800 border-teal-300',
@@ -95,8 +108,8 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
   },
   PROPERTY_REGISTRY: {
     id: 'PROPERTY_REGISTRY',
-    order: 7,
-    label: '7. Cartório de Imóveis (RGI & ITBI)',
+    order: 8,
+    label: '8. Cartório de Imóveis (RGI & ITBI)',
     shortLabel: 'Cartório / RGI',
     description: 'Pagamento de guia de ITBI e protocolo do contrato no Cartório de Registro de Imóveis.',
     badgeColor: 'bg-orange-100 text-orange-800 border-orange-300',
@@ -108,8 +121,8 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
   },
   DISBURSEMENT_COMPLETED: {
     id: 'DISBURSEMENT_COMPLETED',
-    order: 8,
-    label: '8. Recursos Liberados ao Vendedor',
+    order: 9,
+    label: '9. Recursos Liberados ao Vendedor',
     shortLabel: 'Recursos Liberados',
     description: 'Matrícula registrada entregue ao banco; saldo liberado na conta do vendedor.',
     badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300',
@@ -121,8 +134,8 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
   },
   COMMISSION_PAID: {
     id: 'COMMISSION_PAID',
-    order: 9,
-    label: '9. Concluído & Comissionado',
+    order: 10,
+    label: '10. Concluído & Comissionado',
     shortLabel: 'Comissão Paga',
     description: 'Processo arquivado com sucesso e honorários de comissão pagos à Morada Crédito.',
     badgeColor: 'bg-green-100 text-green-800 border-green-300',
@@ -134,7 +147,7 @@ export const STAGE_CONFIGS: Record<ProcessStage, StageConfig> = {
   },
   DECLINED_CANCELLED: {
     id: 'DECLINED_CANCELLED',
-    order: 10,
+    order: 11,
     label: 'Declinado / Cancelado',
     shortLabel: 'Declinado',
     description: 'Processo cancelado por desistência ou crédito não aprovado pelos bancos.',
@@ -152,11 +165,93 @@ export const PIPELINE_STAGES: ProcessStage[] = [
   'CREDIT_ANALYSIS',
   'PROPERTY_VALUATION',
   'LEGAL_COMPLIANCE',
+  'VALUE_CONFIRMATION',
   'CONTRACT_ISSUANCE',
   'CONTRACT_SIGNATURE',
   'PROPERTY_REGISTRY',
   'DISBURSEMENT_COMPLETED',
 ];
+
+export interface CreditStatusConfig {
+  id: CreditAnalysisStatus;
+  label: string;
+  shortLabel: string;
+  description: string;
+  badgeBg: string;
+  badgeActiveBg: string;
+  textColor: string;
+  borderColor: string;
+  dotColor: string;
+}
+
+export const CREDIT_ANALYSIS_STATUS_CONFIGS: Record<CreditAnalysisStatus, CreditStatusConfig> = {
+  EM_ANALISE: {
+    id: 'EM_ANALISE',
+    label: 'Em Análise',
+    shortLabel: 'Em Análise',
+    description: 'Proposta em análise cadastral e de risco nos bancos parceiros.',
+    badgeBg: 'bg-amber-50 text-amber-800 border-amber-300',
+    badgeActiveBg: 'bg-amber-500 text-white border-amber-600',
+    textColor: 'text-amber-700',
+    borderColor: 'border-amber-400',
+    dotColor: 'bg-amber-500',
+  },
+  APROVADO: {
+    id: 'APROVADO',
+    label: 'Aprovado',
+    shortLabel: 'Aprovado',
+    description: 'Crédito aprovado pelo banco. Liberado para avançar para Engenharia e Análise Jurídica.',
+    badgeBg: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+    badgeActiveBg: 'bg-emerald-600 text-white border-emerald-700',
+    textColor: 'text-emerald-700',
+    borderColor: 'border-emerald-500',
+    dotColor: 'bg-emerald-500',
+  },
+  RECUSADO: {
+    id: 'RECUSADO',
+    label: 'Recusado',
+    shortLabel: 'Recusado',
+    description: 'Crédito recusado ou reprovado pela instituição financeira.',
+    badgeBg: 'bg-rose-50 text-rose-800 border-rose-300',
+    badgeActiveBg: 'bg-rose-600 text-white border-rose-700',
+    textColor: 'text-rose-700',
+    borderColor: 'border-rose-400',
+    dotColor: 'bg-rose-500',
+  },
+};
+
+/**
+ * Validates whether a process can advance to a target stage based on business rules.
+ * Business Rule: Stage 3 (PROPERTY_VALUATION), Stage 4 (LEGAL_COMPLIANCE), and subsequent stages
+ * can ONLY be reached if credit analysis is "APROVADO".
+ */
+export const canAdvanceToStage = (
+  targetStage: ProcessStage,
+  creditStatus?: CreditAnalysisStatus
+): { allowed: boolean; reason?: string } => {
+  const STAGES_REQUIRING_APPROVAL: ProcessStage[] = [
+    'PROPERTY_VALUATION',     // 3. Engenharia & Vistoria
+    'LEGAL_COMPLIANCE',       // 4. Análise Jurídica / Dossiê
+    'VALUE_CONFIRMATION',     // 5. Confirmação de Valores
+    'CONTRACT_ISSUANCE',      // 6. Emissão do Contrato
+    'CONTRACT_SIGNATURE',     // 7. Assinatura do Contrato
+    'PROPERTY_REGISTRY',      // 8. Cartório de Imóveis (RGI)
+    'DISBURSEMENT_COMPLETED', // 9. Recursos Liberados
+    'COMMISSION_PAID',        // 10. Concluído & Comissionado
+  ];
+
+  if (STAGES_REQUIRING_APPROVAL.includes(targetStage)) {
+    if (creditStatus !== 'APROVADO') {
+      const statusLabel = creditStatus === 'RECUSADO' ? 'Recusado' : 'Em Análise';
+      return {
+        allowed: false,
+        reason: `A etapa de ${STAGE_CONFIGS[targetStage]?.label || targetStage} requer que a Análise de Crédito esteja com status "Aprovado" (atualmente: ${statusLabel}).`,
+      };
+    }
+  }
+
+  return { allowed: true };
+};
 
 export const BANK_CONFIGS: Record<BankPartner, BankCommissionRule> = {
   'Caixa Econômica Federal': {
@@ -318,6 +413,14 @@ export function getDefaultChecklistForStage(stage: ProcessStage): ProcessCheckli
       { title: 'Declaração de quitação condominial (se apto)', category: 'IMOVEL', required: false },
       { title: 'Parecer Jurídico do Banco Aprovado (Dossiê Conforme)', category: 'BANCO', required: true },
     ],
+    VALUE_CONFIRMATION: [
+      { title: 'Validação do valor final de financiamento com o cliente', category: 'CLIENTE', required: true },
+      { title: 'Alinhamento do prazo acordado (meses / anos)', category: 'CLIENTE', required: true },
+      { title: 'Confirmação da taxa de juros nominal e efetiva do banco', category: 'BANCO', required: true },
+      { title: 'Validação do sistema de amortização (SAC / PRICE)', category: 'CLIENTE', required: true },
+      { title: 'Aprovação da simulação de parcelas e seguros pelo cliente', category: 'CLIENTE', required: true },
+      { title: 'Autorização final para emissão da minuta contratual', category: 'CLIENTE', required: true },
+    ],
     CONTRACT_ISSUANCE: [
       { title: 'Validação da minuta e dados das partes', category: 'BANCO', required: true },
       { title: 'Conferência de conta de crédito do vendedor', category: 'VENDEDOR', required: true },
@@ -368,6 +471,7 @@ export function getFullDefaultChecklist(): ProcessChecklistItem[] {
     'CREDIT_ANALYSIS',
     'PROPERTY_VALUATION',
     'LEGAL_COMPLIANCE',
+    'VALUE_CONFIRMATION',
     'CONTRACT_ISSUANCE',
     'CONTRACT_SIGNATURE',
     'PROPERTY_REGISTRY',

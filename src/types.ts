@@ -1,14 +1,17 @@
 export type ProcessStage =
-  | 'SIMULATION_COLLECTION'   // 1. Simulação & Coleta
+  | 'SIMULATION_COLLECTION'   // 1. Simulação
   | 'CREDIT_ANALYSIS'         // 2. Análise de Crédito
   | 'PROPERTY_VALUATION'      // 3. Engenharia & Vistoria
   | 'LEGAL_COMPLIANCE'        // 4. Análise Jurídica / Dossiê
-  | 'CONTRACT_ISSUANCE'       // 5. Emissão do Contrato
-  | 'CONTRACT_SIGNATURE'      // 6. Assinatura do Contrato
-  | 'PROPERTY_REGISTRY'       // 7. Cartório de Imóveis & ITBI
-  | 'DISBURSEMENT_COMPLETED'  // 8. Recursos Liberados ao Vendedor
-  | 'COMMISSION_PAID'         // 9. Concluído & Comissionado
+  | 'VALUE_CONFIRMATION'      // 5. Confirmação de Valores
+  | 'CONTRACT_ISSUANCE'       // 6. Emissão do Contrato
+  | 'CONTRACT_SIGNATURE'      // 7. Assinatura do Contrato
+  | 'PROPERTY_REGISTRY'       // 8. Cartório de Imóveis & ITBI
+  | 'DISBURSEMENT_COMPLETED'  // 9. Recursos Liberados ao Vendedor
+  | 'COMMISSION_PAID'         // 10. Concluído & Comissionado
   | 'DECLINED_CANCELLED';     // Declinado / Cancelado
+
+export type CreditAnalysisStatus = 'EM_ANALISE' | 'APROVADO' | 'RECUSADO';
 
 export type BankPartner =
   | 'Caixa Econômica Federal'
@@ -54,7 +57,7 @@ export interface ProcessNote {
   text: string;
   createdAt: string;
   author: string;
-  category: 'GERAL' | 'BANCO' | 'JURIDICO' | 'CARTORIO' | 'CLIENTE';
+  category: 'GERAL' | 'BANCO' | 'JURIDICO' | 'CARTORIO' | 'CLIENTE' | 'ENGENHARIA' | 'CORRETOR' | 'PENDENCIA';
 }
 
 export interface StageHistoryEntry {
@@ -120,15 +123,21 @@ export interface ClientProcess {
   stageUpdatedAt: string;
   createdAt: string;
   priority: PriorityLevel;
+  creditAnalysisStatus?: CreditAnalysisStatus; // 'EM_ANALISE' | 'APROVADO' | 'RECUSADO'
+  creditApprovalDate?: string;
+  creditAnalysisNotes?: string;
   
   // Detalhes & Rastreabilidade
   notes: ProcessNote[];
   checklist: ProcessChecklistItem[];
   stageHistory: StageHistoryEntry[];
   
-  // Análise de Riscos / Pendências
+  // Análise de Riscos / Pendências & Observações
   hasPendingIssues?: boolean;
   pendingIssueDescription?: string;
+  generalObservations?: string;
+  valuationNotes?: string;
+  legalNotes?: string;
 }
 
 export interface BankCommissionRule {

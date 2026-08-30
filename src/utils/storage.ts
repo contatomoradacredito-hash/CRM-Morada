@@ -22,7 +22,17 @@ export function loadProcesses(): ClientProcess[] {
     if (saved !== null) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
-        return parsed;
+        return parsed.map((p) => {
+          if (!p.creditAnalysisStatus) {
+            const isAdvancedStage =
+              p.stage !== 'SIMULATION_COLLECTION' && p.stage !== 'CREDIT_ANALYSIS' && p.stage !== 'DECLINED_CANCELLED';
+            return {
+              ...p,
+              creditAnalysisStatus: isAdvancedStage ? 'APROVADO' : 'EM_ANALISE',
+            };
+          }
+          return p;
+        });
       }
     }
     return [];

@@ -25,15 +25,28 @@ import {
   RefreshCw,
   MoreVertical,
   Layers,
+  ShieldAlert,
+  Check,
+  X,
+  SlidersHorizontal,
+  Scale,
 } from 'lucide-react';
-import { BankPartner, ClientProcess, ProcessStage } from '../types';
-import { BANK_CONFIGS, CREDIT_TYPE_LABELS, PIPELINE_STAGES, STAGE_CONFIGS } from '../utils/constants';
+import { BankPartner, ClientProcess, CreditAnalysisStatus, ProcessStage } from '../types';
+import {
+  BANK_CONFIGS,
+  CREDIT_ANALYSIS_STATUS_CONFIGS,
+  CREDIT_TYPE_LABELS,
+  PIPELINE_STAGES,
+  STAGE_CONFIGS,
+  canAdvanceToStage,
+} from '../utils/constants';
 import { formatCurrency, formatMonthYear, getDaysDifference } from '../utils/formatters';
 
 interface PipelineBoardProps {
   processes: ClientProcess[];
   onSelectProcess: (process: ClientProcess) => void;
   onAdvanceStage: (processId: string, nextStage: ProcessStage) => void;
+  onUpdateCreditStatus?: (processId: string, status: CreditAnalysisStatus) => void;
   onOpenNewProcess: () => void;
   onOpenNewProcessWithMonth?: (month: string) => void;
   onResetData?: () => void;
@@ -49,6 +62,7 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
   processes,
   onSelectProcess,
   onAdvanceStage,
+  onUpdateCreditStatus,
   onOpenNewProcess,
   onOpenNewProcessWithMonth,
   onResetData,
@@ -60,6 +74,24 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
   setSearchQuery,
 }) => {
   const [showArchived, setShowArchived] = useState<boolean>(false);
+  const [blockedModal, setBlockedModal] = useState<{
+    process: ClientProcess;
+    targetStage: ProcessStage;
+    reason?: string;
+  } | null>(null);
+
+  const handleAttemptAdvance = (proc: ClientProcess, targetStage: ProcessStage) => {
+    const check = canAdvanceToStage(targetStage, proc.creditAnalysisStatus);
+    if (!check.allowed) {
+      setBlockedModal({
+        process: proc,
+        targetStage,
+        reason: check.reason,
+      });
+      return;
+    }
+    onAdvanceStage(proc.id, targetStage);
+  };
 
   // Filter processes
   const filteredProcesses = processes.filter((p) => {
@@ -89,6 +121,7 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
     'CREDIT_ANALYSIS',
     'PROPERTY_VALUATION',
     'LEGAL_COMPLIANCE',
+    'VALUE_CONFIRMATION',
     'CONTRACT_ISSUANCE',
     'CONTRACT_SIGNATURE',
     'PROPERTY_REGISTRY',
@@ -122,6 +155,9 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
         return <Home className="w-4 h-4" />;
       case 'FileCheck2':
         return <FileCheck2 className="w-4 h-4" />;
+      case 'SlidersHorizontal':
+      case 'Scale':
+        return <SlidersHorizontal className="w-4 h-4" />;
       case 'FileText':
         return <FileText className="w-4 h-4" />;
       case 'PenTool':
@@ -396,7 +432,7 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                           )}
 
                           {/* Meta: Days in Stage & Estimated Month */}
-                          <div className="flex items-center justify-between text-[10px] text-slate-500 mb-2.5">
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 mb-2">
                             <span className="flex items-center gap-1 font-medium">
                               <Clock className="w-3 h-3 text-slate-400" />
                               {daysInStage === 0 ? 'Hoje' : `${daysInStage}d nesta fase`}
@@ -405,6 +441,124 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                               Prev: {formatMonthYear(proc.estimatedIssuanceMonth).split(' ')[0]}
                             </span>
                           </div>
+
+                          {/* Credit Analysis Substatus (Interactive on Stage 2, Badge on other stages) */}
+                          {proc.stage === 'CREDIT_ANALYSIS' ? (
+                            <div
+                              className="mb-2 p-2 rounded-lg bg-slate-50 border border-slate-200"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 mb-1.5">
+                                <span>Status da Análise:</span>
+                                <span className={CREDIT_ANALYSIS_STATUS_CONFIGS[proc.creditAnalysisStatus || 'EM_ANALISE']?.textColor}>
+                                  {CREDIT_ANALYSIS_STATUS_CONFIGS[proc.creditAnalysisStatus || 'EM_ANALISE']?.label}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-1">
+                                <button
+                                  type="button"
+                                  id={`btn-credit-analysis-${proc.id}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateCreditStatus?.(proc.id, 'EM_ANALISE');
+                                  }}
+                                  className={`py-1 px-0.5 text-[10px] font-bold rounded flex items-center justify-center gap-0.5 transition ${
+                                    !proc.creditAnalysisStatus || proc.creditAnalysisStatus === 'EM_ANALISE'
+                                      ? 'bg-amber-500 text-white shadow-xs'
+                                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                                  }`}
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-300"></span>
+                                  <span>Análise</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  id={`btn-credit-approved-${proc.id}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateCreditStatus?.(proc.id, 'APROVADO');
+                                  }}
+                                  className={`py-1 px-0.5 text-[10px] font-bold rounded flex items-center justify-center gap-0.5 transition ${
+                                    proc.creditAnalysisStatus === 'APROVADO'
+                                      ? 'bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-400'
+                                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                                  }`}
+                                >
+                                  <Check className="w-3 h-3 text-emerald-300" />
+                                  <span>Aprovado</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  id={`btn-credit-rejected-${proc.id}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUpdateCreditStatus?.(proc.id, 'RECUSADO');
+                                  }}
+                                  className={`py-1 px-0.5 text-[10px] font-bold rounded flex items-center justify-center gap-0.5 transition ${
+                                    proc.creditAnalysisStatus === 'RECUSADO'
+                                      ? 'bg-rose-600 text-white shadow-xs'
+                                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                                  }`}
+                                >
+                                  <X className="w-3 h-3 text-rose-300" />
+                                  <span>Recusado</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : proc.stage === 'VALUE_CONFIRMATION' ? (
+                            <div className="mb-2 bg-gradient-to-br from-amber-50 to-amber-100/70 p-2 rounded-lg border border-amber-300 text-[11px] text-amber-950 space-y-1">
+                              <div className="flex items-center justify-between text-[10px] font-bold text-amber-800">
+                                <span className="flex items-center gap-1">
+                                  <SlidersHorizontal className="w-3 h-3 text-amber-600 shrink-0" />
+                                  <span>Ajuste de Valores:</span>
+                                </span>
+                                <span className="font-mono bg-amber-200/80 px-1.5 py-0.2 rounded text-[10px] font-bold">
+                                  {proc.interestRateAnnual}% a.a.
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1 text-[10px] font-semibold">
+                                <div>
+                                  <span className="text-amber-800/70 block text-[9px]">Prazo:</span>
+                                  <span className="font-bold">{proc.termMonths} meses</span>
+                                </div>
+                                <div>
+                                  <span className="text-amber-800/70 block text-[9px]">Financiado:</span>
+                                  <span className="font-bold text-emerald-800">{formatCurrency(proc.financingValue)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : proc.stage !== 'SIMULATION_COLLECTION' && proc.creditAnalysisStatus === 'APROVADO' ? (
+                            <div className="mb-2 flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                              <Check className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span>Crédito Aprovado</span>
+                            </div>
+                          ) : null}
+
+                          {/* Notes or General Observation Snippet */}
+                          {(proc.generalObservations || (proc.notes && proc.notes.length > 0)) && (
+                            <div
+                              className="mb-2 bg-amber-50/70 border border-amber-200/80 rounded-lg p-1.5 text-[10px] text-slate-700 space-y-0.5"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectProcess(proc);
+                              }}
+                            >
+                              <div className="flex items-center justify-between text-[9px] font-bold text-amber-900">
+                                <span className="flex items-center gap-1">
+                                  <MessageCircle className="w-3 h-3 text-amber-600" />
+                                  <span>{proc.notes && proc.notes.length > 0 ? 'Última Nota / Obs' : 'Observação'}</span>
+                                </span>
+                                {proc.notes && proc.notes.length > 0 && (
+                                  <span className="bg-amber-200/90 text-amber-950 px-1 py-0.2 rounded font-mono font-bold">
+                                    {proc.notes.length}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="line-clamp-1 italic text-slate-600 text-[10px]">
+                                {proc.notes && proc.notes.length > 0 ? proc.notes[0].text : proc.generalObservations}
+                              </p>
+                            </div>
+                          )}
 
                           {/* Quick Stage Mover Selector */}
                           <div
@@ -415,7 +569,7 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                             <select
                               id={`select-move-stage-${proc.id}`}
                               value={proc.stage}
-                              onChange={(e) => onAdvanceStage(proc.id, e.target.value as ProcessStage)}
+                              onChange={(e) => handleAttemptAdvance(proc, e.target.value as ProcessStage)}
                               className="w-full bg-white border border-slate-200 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-800 focus:outline-none focus:border-emerald-500 cursor-pointer"
                             >
                               {Object.values(STAGE_CONFIGS).map((s) => (
@@ -437,7 +591,7 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                                 id={`btn-prev-stage-${proc.id}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onAdvanceStage(proc.id, prevStage);
+                                  handleAttemptAdvance(proc, prevStage);
                                 }}
                                 title={`Voltar para ${STAGE_CONFIGS[prevStage]?.shortLabel || prevStage}`}
                                 className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 text-xs transition cursor-pointer flex items-center gap-0.5"
@@ -468,10 +622,14 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
                                 id={`btn-next-stage-${proc.id}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  onAdvanceStage(proc.id, nextStage);
+                                  handleAttemptAdvance(proc, nextStage);
                                 }}
                                 title={`Avançar para ${STAGE_CONFIGS[nextStage]?.shortLabel || nextStage}`}
-                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-emerald-600 text-white text-[10px] font-bold transition cursor-pointer shadow-xs active:scale-95"
+                                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-white text-[10px] font-bold transition cursor-pointer shadow-xs active:scale-95 ${
+                                  proc.stage === 'CREDIT_ANALYSIS' && proc.creditAnalysisStatus === 'APROVADO'
+                                    ? 'bg-emerald-600 hover:bg-emerald-500'
+                                    : 'bg-slate-900 hover:bg-emerald-600'
+                                }`}
                               >
                                 <span>Avançar</span>
                                 <ArrowRight className="w-3 h-3" />
@@ -612,6 +770,72 @@ export const PipelineBoard: React.FC<PipelineBoardProps> = ({
           )}
         </div>
       </div>
+
+      {/* Credit Approval Block Modal */}
+      {blockedModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Aprovação de Crédito Obrigatória</h3>
+                  <p className="text-[11px] text-slate-400">Controle de avanço do funil</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBlockedModal(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2">
+                <p className="font-semibold leading-relaxed">
+                  Para avançar o processo de <strong className="text-slate-950">{blockedModal.process.clientName}</strong> para a etapa de{' '}
+                  <strong className="text-slate-950">{STAGE_CONFIGS[blockedModal.targetStage]?.label}</strong>, o crédito bancário precisa estar com status <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold">Aprovado</span>.
+                </p>
+                <p className="text-[11px] text-amber-800 pt-1 border-t border-amber-200/60">
+                  Status atual: <span className="font-bold uppercase tracking-wider">{blockedModal.process.creditAnalysisStatus === 'RECUSADO' ? 'Recusado' : 'Em Análise'}</span>
+                </p>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                Deseja alterar o status da Análise de Crédito para <strong>Aprovado</strong> e avançar agora?
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setBlockedModal(null)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancelar / Manter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onUpdateCreditStatus) {
+                      onUpdateCreditStatus(blockedModal.process.id, 'APROVADO');
+                    }
+                    onAdvanceStage(blockedModal.process.id, blockedModal.targetStage);
+                    setBlockedModal(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Aprovar Crédito e Avançar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
