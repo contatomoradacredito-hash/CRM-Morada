@@ -1,6 +1,6 @@
 {
-  "name": "Morada Crédito Imobiliário - CRM",
-  "description": "Morada Crédito Imobiliário - CRM • Gestão de Processos",
+  "name": "Morada Crédito Imobiliário",
+  "description": "Morada Crédito Imobiliário • Gestão de Processos",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
