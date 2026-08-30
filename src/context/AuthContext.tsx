@@ -34,15 +34,15 @@ interface AuthContextType {
   loginAsDemo: () => Promise<void>;
 }
 
-const SESSION_STORAGE_KEY = 'morada_crm_auth_session_v1';
-const USERS_DB_KEY = 'morada_crm_registered_users_v1';
+const SESSION_STORAGE_KEY = 'morada_crm_auth_session_v2';
+const USERS_DB_KEY = 'morada_crm_registered_users_v2';
 
-// Default Admin account for Morada Crédito
+// Default Master Administrator account for Morada Crédito
 const DEFAULT_DEMO_USER: StoredUserAccount = {
-  uid: 'morada_admin_demo_01',
-  email: 'contato@moradacredito.com.br',
-  passwordHash: 'Morada@2026',
-  displayName: 'Diretoria Morada Crédito',
+  uid: 'morada_admin_master_01',
+  email: 'lima@moradacredito.com',
+  passwordHash: 'Degos*592623',
+  displayName: 'Deiglison Lima',
   createdAt: new Date().toISOString(),
 };
 
