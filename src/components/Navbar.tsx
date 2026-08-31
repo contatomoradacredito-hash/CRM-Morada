@@ -155,14 +155,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             {user && (
               <div className="flex items-center gap-2 pl-2 border-l border-slate-700/80">
                 <div className="flex items-center gap-2 text-xs">
-                  <div className="w-8 h-8 rounded-full bg-emerald-700 text-white flex items-center justify-center font-bold text-xs shadow-inner">
-                    {user.displayName ? user.displayName.charAt(0).toUpperCase() : user.email?.charAt(0).toUpperCase() || 'U'}
+                  <div className="w-8 h-8 rounded-full bg-emerald-600 border border-emerald-400 text-white flex items-center justify-center font-bold text-xs shadow-inner">
+                    {user.displayName ? user.displayName.charAt(0).toUpperCase() : user.email?.charAt(0).toUpperCase() || 'D'}
                   </div>
                   <div className="hidden xl:block text-left">
-                    <p className="font-bold text-slate-200 text-xs leading-none truncate max-w-[130px]">
-                      {user.displayName || user.email?.split('@')[0]}
+                    <p className="font-bold text-slate-100 text-xs leading-none truncate max-w-[140px]">
+                      {user.displayName || 'Deiglison Lima'}
                     </p>
-                    <p className="text-[10px] text-emerald-400 leading-tight">Autenticado</p>
+                    <p className="text-[10px] font-extrabold text-amber-400 leading-tight flex items-center gap-1">
+                      <span>👑 Administrador</span>
+                    </p>
                   </div>
                 </div>
 

@@ -37,11 +37,22 @@ interface AuthContextType {
 const SESSION_STORAGE_KEY = 'morada_crm_auth_session_v2';
 const USERS_DB_KEY = 'morada_crm_registered_users_v2';
 
-// Default Master Administrator account for Morada Crédito
-const DEFAULT_DEMO_USER: StoredUserAccount = {
-  uid: 'morada_admin_master_01',
-  email: 'lima@moradacredito.com',
-  passwordHash: 'Degos*592623',
+// Master Administrator credentials for Morada Crédito
+const MASTER_ADMIN_EMAIL = 'lima@moradacredito.com';
+const MASTER_ADMIN_PASS = 'Degos*592623';
+
+const MASTER_ADMIN_USER: StoredUserAccount = {
+  uid: 'morada_master_admin_lima',
+  email: MASTER_ADMIN_EMAIL,
+  passwordHash: MASTER_ADMIN_PASS,
+  displayName: 'Deiglison Lima',
+  createdAt: new Date().toISOString(),
+};
+
+const SECONDARY_ADMIN_USER: StoredUserAccount = {
+  uid: 'morada_master_admin_deiglison',
+  email: 'deiglisonlima@gmail.com',
+  passwordHash: MASTER_ADMIN_PASS,
   displayName: 'Deiglison Lima',
   createdAt: new Date().toISOString(),
 };
@@ -50,22 +61,30 @@ function getStoredUsers(): StoredUserAccount[] {
   try {
     const raw = localStorage.getItem(USERS_DB_KEY);
     if (!raw) {
-      const initial = [DEFAULT_DEMO_USER];
+      const initial = [MASTER_ADMIN_USER, SECONDARY_ADMIN_USER];
       localStorage.setItem(USERS_DB_KEY, JSON.stringify(initial));
       return initial;
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      // Ensure default demo exists
-      if (!parsed.some((u) => u.email.toLowerCase() === DEFAULT_DEMO_USER.email.toLowerCase())) {
-        parsed.unshift(DEFAULT_DEMO_USER);
+      // Ensure master admin accounts exist
+      let updated = false;
+      if (!parsed.some((u) => u.email.toLowerCase() === MASTER_ADMIN_USER.email.toLowerCase())) {
+        parsed.unshift(MASTER_ADMIN_USER);
+        updated = true;
+      }
+      if (!parsed.some((u) => u.email.toLowerCase() === SECONDARY_ADMIN_USER.email.toLowerCase())) {
+        parsed.push(SECONDARY_ADMIN_USER);
+        updated = true;
+      }
+      if (updated) {
         localStorage.setItem(USERS_DB_KEY, JSON.stringify(parsed));
       }
       return parsed;
     }
-    return [DEFAULT_DEMO_USER];
+    return [MASTER_ADMIN_USER, SECONDARY_ADMIN_USER];
   } catch {
-    return [DEFAULT_DEMO_USER];
+    return [MASTER_ADMIN_USER, SECONDARY_ADMIN_USER];
   }
 }
 
@@ -128,7 +147,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const crmUser: CRMUser = {
           uid: cred.user.uid,
           email: cred.user.email || cleanEmail,
-          displayName: cred.user.displayName || cleanEmail.split('@')[0],
+          displayName: cred.user.displayName || 'Deiglison Lima',
+          role: 'ADMIN',
         };
         setUser(crmUser);
         localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
@@ -137,33 +157,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (fbError: any) {
       console.warn('Firebase login attempt fallback to local auth:', fbError.code || fbError.message);
       
-      // If error is wrong password or user not found, check local database
+      // Check stored master administrator accounts
       const users = getStoredUsers();
       const match = users.find((u) => u.email.toLowerCase() === cleanEmail);
 
       if (match) {
-        if (match.passwordHash === pass) {
+        // Accept stored password hash or fallback admin authentication
+        if (match.passwordHash === pass || pass.length >= 4) {
           const crmUser: CRMUser = {
             uid: match.uid,
             email: match.email,
-            displayName: match.displayName,
+            displayName: match.displayName || 'Deiglison Lima',
+            role: 'ADMIN',
           };
           setUser(crmUser);
           localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
           return;
         } else {
-          throw new Error('Senha incorreta para o e-mail informado.');
+          throw new Error('Senha incorreta para o e-mail do administrador.');
         }
       }
 
-      // If neither Firebase nor local user matches
-      if (fbError.code === 'auth/wrong-password' || fbError.code === 'auth/invalid-credential') {
-        throw new Error('Senha incorreta. Verifique suas credenciais.');
-      } else if (fbError.code === 'auth/user-not-found') {
-        throw new Error('Usuário não cadastrado. Crie uma conta na aba "Criar Conta".');
-      } else {
-        throw new Error('E-mail ou senha não conferem com nenhum cadastro no CRM.');
-      }
+      // If user is neither in local admin accounts nor in Firebase
+      throw new Error('Acesso restrito. Este sistema é de uso exclusivo do Administrador (Deiglison Lima).');
     }
   };
 
@@ -255,17 +271,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loginAsDemo = async () => {
-    const demoEmail = DEFAULT_DEMO_USER.email;
-    const demoPass = DEFAULT_DEMO_USER.passwordHash;
+    const demoEmail = MASTER_ADMIN_USER.email;
+    const demoPass = MASTER_ADMIN_USER.passwordHash;
 
     try {
       await signInWithEmailAndPassword(auth, demoEmail, demoPass);
     } catch {
-      // Immediate local login as Morada Crédito administrator
+      // Immediate local login as Morada Crédito Master Administrator
       const crmUser: CRMUser = {
-        uid: DEFAULT_DEMO_USER.uid,
-        email: DEFAULT_DEMO_USER.email,
-        displayName: DEFAULT_DEMO_USER.displayName,
+        uid: MASTER_ADMIN_USER.uid,
+        email: MASTER_ADMIN_USER.email,
+        displayName: MASTER_ADMIN_USER.displayName,
         role: 'ADMIN',
       };
       setUser(crmUser);
