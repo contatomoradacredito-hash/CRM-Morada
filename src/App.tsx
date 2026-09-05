@@ -34,6 +34,7 @@ import {
   loadProcessesFromFirestore,
   subscribeToProcesses,
   mergeProcessesLists,
+  testConnection,
 } from './lib/firebase';
 import { Building2 } from 'lucide-react';
 
@@ -62,23 +63,52 @@ function CRMApp() {
     }, 3500);
   }, []);
 
-  // Sync with Firestore & localStorage with non-destructive merge
+  // Sync with Firestore & localStorage with non-destructive merge and automatic initial upload
   useEffect(() => {
     if (!user) return;
 
-    // Load initial processes from Firestore
-    loadProcessesFromFirestore().then((cloudProcesses) => {
-      if (cloudProcesses && cloudProcesses.length > 0) {
-        setProcesses((current) => {
-          const merged = mergeProcessesLists(current, cloudProcesses);
-          saveProcesses(merged);
-          return merged;
-        });
-      }
-    });
+    let isMounted = true;
 
-    // Subscribe to real-time changes
+    async function initializeCloudSync() {
+      try {
+        const cloudProcesses = await loadProcessesFromFirestore();
+
+        if (cloudProcesses && cloudProcesses.length > 0) {
+          if (!isMounted) return;
+          setProcesses((current) => {
+            const merged = mergeProcessesLists(current, cloudProcesses);
+            saveProcesses(merged);
+            // If local dataset had new or un-synced items, update Firestore
+            if (merged.length > cloudProcesses.length) {
+              syncProcessesToFirestore(merged);
+            }
+            return merged;
+          });
+        } else {
+          // Cloud database is clean/empty: upload 12-month history to Firestore
+          const currentProcesses = loadProcesses();
+          const datasetToUpload =
+            currentProcesses && currentProcesses.length > 0
+              ? currentProcesses
+              : INITIAL_PROCESSES;
+
+          if (datasetToUpload && datasetToUpload.length > 0) {
+            const res = await syncProcessesToFirestore(datasetToUpload);
+            if (res.success && isMounted) {
+              console.log(`Base de dados Firebase Firestore inicializada com ${res.count} registros dos 12 meses.`);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Initial cloud sync notice:', err);
+      }
+    }
+
+    initializeCloudSync();
+
+    // Real-time Firestore synchronization
     const unsubscribe = subscribeToProcesses((cloudProcesses) => {
+      if (!isMounted) return;
       setProcesses((current) => {
         const merged = mergeProcessesLists(current, cloudProcesses);
         saveProcesses(merged);
@@ -86,7 +116,10 @@ function CRMApp() {
       });
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, [user]);
 
   const availableMonths = getAvailableMonths(processes);

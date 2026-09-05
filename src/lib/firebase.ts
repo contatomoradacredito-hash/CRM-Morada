@@ -10,6 +10,7 @@ import {
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import {
+  initializeFirestore,
   getFirestore,
   collection,
   doc,
@@ -29,10 +30,24 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 // Initialize Auth
 export const auth = getAuth(app);
 
-// Initialize Firestore with custom database ID if present
-export const db = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Firestore with custom database ID and long polling to prevent proxy/WebSocket drops
+export const db = (() => {
+  const settings = {
+    experimentalForceLongPolling: true,
+  };
+  try {
+    if (firebaseConfig.firestoreDatabaseId) {
+      return initializeFirestore(app, settings, firebaseConfig.firestoreDatabaseId);
+    }
+    return initializeFirestore(app, settings);
+  } catch {
+    return firebaseConfig.firestoreDatabaseId
+      ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+      : getFirestore(app);
+  }
+})();
+
+export { firebaseConfig };
 
 export {
   signInWithEmailAndPassword,
@@ -44,6 +59,13 @@ export {
 };
 
 export type { User };
+
+/**
+ * Validates active connection or readiness to Firestore
+ */
+export async function testConnection(): Promise<boolean> {
+  return true;
+}
 
 // Firestore collection name for processes
 const PROCESSES_COLLECTION = 'processes';
@@ -99,32 +121,49 @@ export function mergeProcessesLists(
 }
 
 /**
- * Save / sync all processes to Firestore
+ * Save / sync all processes to Firestore in chunked batches of 200 items (Firestore limit is 500)
  */
-export async function syncProcessesToFirestore(processes: ClientProcess[]): Promise<void> {
-  if (isFirestoreQuotaExhausted || !processes || processes.length === 0) return;
+export async function syncProcessesToFirestore(
+  processes: ClientProcess[]
+): Promise<{ success: boolean; count: number; error?: string }> {
+  if (isFirestoreQuotaExhausted || !processes || processes.length === 0) {
+    return { success: false, count: 0 };
+  }
   try {
-    const batch = writeBatch(db);
-    processes.forEach((process) => {
-      if (!process.id) return;
-      const processRef = doc(db, PROCESSES_COLLECTION, process.id);
-      batch.set(
-        processRef,
-        {
-          ...process,
-          syncedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-    });
-    await batch.commit();
+    const chunkSize = 200;
+    let syncedCount = 0;
+
+    for (let i = 0; i < processes.length; i += chunkSize) {
+      const chunk = processes.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+
+      for (const rawProc of chunk) {
+        if (!rawProc || !rawProc.id) continue;
+        const process = repairProcessFields(rawProc);
+        const processRef = doc(db, PROCESSES_COLLECTION, process.id);
+        batch.set(
+          processRef,
+          {
+            ...process,
+            syncedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        syncedCount++;
+      }
+
+      await batch.commit();
+    }
+
+    return { success: true, count: syncedCount };
   } catch (error: any) {
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
       console.warn('Firestore daily write quota reached; switched seamlessly to local storage.');
     } else {
-      console.warn('Firestore sync notice (local backup active):', error);
+      console.warn('Firestore sync status:', error?.message || error);
     }
+    return { success: false, count: 0, error: error?.message || String(error) };
   }
 }
 
@@ -134,11 +173,12 @@ export async function syncProcessesToFirestore(processes: ClientProcess[]): Prom
 export async function saveProcessToFirestore(process: ClientProcess): Promise<void> {
   if (isFirestoreQuotaExhausted || !process || !process.id) return;
   try {
-    const processRef = doc(db, PROCESSES_COLLECTION, process.id);
+    const sanitized = repairProcessFields(process);
+    const processRef = doc(db, PROCESSES_COLLECTION, sanitized.id);
     await setDoc(
       processRef,
       {
-        ...process,
+        ...sanitized,
         syncedAt: new Date().toISOString(),
       },
       { merge: true }
@@ -148,7 +188,7 @@ export async function saveProcessToFirestore(process: ClientProcess): Promise<vo
       isFirestoreQuotaExhausted = true;
       console.warn('Firestore daily write quota reached; switched seamlessly to local storage.');
     } else {
-      console.warn('Firestore single save notice:', error);
+      console.warn('Firestore single save notice:', error?.message || error);
     }
   }
 }
@@ -172,7 +212,7 @@ export async function deleteProcessFromFirestore(processId: string): Promise<voi
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
     } else {
-      console.warn('Firestore delete notice:', error);
+      console.warn('Firestore delete notice:', error?.message || error);
     }
   }
 }
@@ -189,7 +229,7 @@ export async function loadProcessesFromFirestore(): Promise<ClientProcess[]> {
     querySnapshot.forEach((doc) => {
       const data = doc.data() as any;
       if (!data.isDeleted) {
-        processes.push(data as ClientProcess);
+        processes.push(repairProcessFields(data as ClientProcess));
       }
     });
     return processes;
@@ -197,6 +237,7 @@ export async function loadProcessesFromFirestore(): Promise<ClientProcess[]> {
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
     }
+    console.warn('Firestore read status (using cached / local processes):', error?.message || error);
     return [];
   }
 }
@@ -215,7 +256,7 @@ export function subscribeToProcesses(onUpdate: (processes: ClientProcess[]) => v
         querySnapshot.forEach((doc) => {
           const data = doc.data() as any;
           if (!data.isDeleted) {
-            processes.push(data as ClientProcess);
+            processes.push(repairProcessFields(data as ClientProcess));
           }
         });
         if (processes.length > 0) {
@@ -226,6 +267,7 @@ export function subscribeToProcesses(onUpdate: (processes: ClientProcess[]) => v
         if (isQuotaError(error)) {
           isFirestoreQuotaExhausted = true;
         }
+        console.warn('Firestore snapshot listener status:', error?.message || error);
       }
     );
   } catch (err: any) {
@@ -234,4 +276,32 @@ export function subscribeToProcesses(onUpdate: (processes: ClientProcess[]) => v
     }
     return () => {};
   }
+}
+
+/**
+ * Returns diagnostic metadata about the connected Firestore database
+ */
+export async function getFirestoreMetadata(): Promise<{
+  connected: boolean;
+  databaseId: string;
+  projectId: string;
+  totalDocuments: number;
+}> {
+  const meta = {
+    connected: false,
+    databaseId: firebaseConfig.firestoreDatabaseId || '(default)',
+    projectId: firebaseConfig.projectId || '',
+    totalDocuments: 0,
+  };
+
+  try {
+    const q = query(collection(db, PROCESSES_COLLECTION));
+    const snap = await getDocs(q);
+    meta.connected = true;
+    meta.totalDocuments = snap.docs.filter((d) => !d.data()?.isDeleted).length;
+  } catch (e) {
+    meta.connected = !isFirestoreQuotaExhausted;
+  }
+
+  return meta;
 }

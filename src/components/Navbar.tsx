@@ -114,11 +114,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 id="btn-open-database-mgmt"
                 onClick={onOpenDataManagement}
-                title="Gerenciar Base de Dados / Zerar / Importar"
+                title="Base de Dados Firebase Firestore Conectada (ai-studio-moradacrditoimob-6e7a570c-55e9-474a-80f6-856fbe85f1be)"
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
               >
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                 <Database className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Base de Dados</span>
+                <span className="hidden sm:inline">Firebase Nuvem</span>
               </button>
 
               <button

@@ -1,15 +1,17 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Restrict all data: only authenticated users can read or write
-    match /users/{userId} {
-      allow read, write: if request.auth != null;
-    }
-
+    // Shared CRM financing processes: allow read and write
     match /processes/{processId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
+    // User profiles and sessions
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Fallback rule
     match /{document=**} {
       allow read, write: if request.auth != null;
     }

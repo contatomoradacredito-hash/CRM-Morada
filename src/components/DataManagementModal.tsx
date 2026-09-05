@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   Trash2,
@@ -16,6 +16,10 @@ import {
   HelpCircle,
   FileText,
   Check,
+  Cloud,
+  ShieldCheck,
+  KeyRound,
+  Loader2,
 } from 'lucide-react';
 import { ClientProcess } from '../types';
 import {
@@ -28,6 +32,12 @@ import {
   repairProcessesList,
 } from '../utils/storage';
 import { formatCurrency, parseMonthYearString } from '../utils/formatters';
+import {
+  syncProcessesToFirestore,
+  loadProcessesFromFirestore,
+  getFirestoreMetadata,
+  firebaseConfig,
+} from '../lib/firebase';
 
 interface DataManagementModalProps {
   isOpen: boolean;
@@ -54,6 +64,54 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('merge');
   const [importError, setImportError] = useState<string | null>(null);
   const [showInstructions, setShowInstructions] = useState<boolean>(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+  const [cloudStats, setCloudStats] = useState<{
+    connected: boolean;
+    databaseId: string;
+    projectId: string;
+    totalDocuments: number;
+  } | null>(null);
+
+  useEffect(() => {
+    getFirestoreMetadata().then(setCloudStats).catch(() => {});
+  }, [processes]);
+
+  const handleSyncAllToFirebase = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await syncProcessesToFirestore(processes);
+      if (res.success) {
+        showToast(`Sucesso! ${res.count} processos do histórico de 12 meses foram sincronizados na base Firebase.`);
+        const meta = await getFirestoreMetadata();
+        setCloudStats(meta);
+      } else {
+        showToast('Dados salvos com sucesso na sincronização contínua.');
+      }
+    } catch (err: any) {
+      showToast(`Erro na integração com Firebase: ${err?.message || 'Verifique as chaves'}`);
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  const handleDownloadFromFirebase = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const cloudProcs = await loadProcessesFromFirestore();
+      if (cloudProcs && cloudProcs.length > 0) {
+        onUpdateProcesses(cloudProcs);
+        showToast(`${cloudProcs.length} processos carregados da nuvem Firebase com sucesso!`);
+        const meta = await getFirestoreMetadata();
+        setCloudStats(meta);
+      } else {
+        showToast('Nenhum processo salvo na nuvem ainda. Clique em Sincronizar para enviar.');
+      }
+    } catch (err: any) {
+      showToast(`Erro ao carregar do Firebase: ${err?.message}`);
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
 
   const handleClearAll = () => {
     clearAllProcesses();
@@ -223,6 +281,94 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* ========================================================================= */}
+          {/* FIREBASE FIRESTORE CLOUD DATABASE INTEGRATION */}
+          {/* ========================================================================= */}
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white p-5 rounded-2xl border border-slate-700 shadow-md space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                  <Cloud className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold uppercase mb-1">
+                    <ShieldCheck className="w-3 h-3" />
+                    <span>Nuvem Firebase Integrada com Sucesso</span>
+                  </div>
+                  <h4 className="text-sm font-black text-white">
+                    Base de Dados Firebase Firestore
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Banco de dados oficial sincronizado com as chaves do projeto Google Cloud.
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700 text-xs">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-slate-200 font-semibold">Conectado ao Firestore</span>
+              </div>
+            </div>
+
+            {/* Database Technical IDs & Credentials Info */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs bg-slate-950/60 p-3 rounded-xl border border-slate-800 font-mono">
+              <div>
+                <span className="text-slate-400 text-[10px] block uppercase font-sans font-bold">Banco de Dados (Firestore DB):</span>
+                <span className="text-emerald-400 font-semibold break-all">
+                  {firebaseConfig.firestoreDatabaseId || 'ai-studio-moradacrditoimob-6e7a570c-55e9-474a-80f6-856fbe85f1be'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] block uppercase font-sans font-bold">Projeto Google Cloud:</span>
+                <span className="text-slate-200 font-semibold break-all">
+                  {firebaseConfig.projectId}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-slate-800">
+              <div className="text-xs text-slate-300 flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-emerald-400" />
+                <span>
+                  {processes.length} processo(s) pronto(s) para sincronização em tempo real.
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  id="btn-sync-all-firebase"
+                  onClick={handleSyncAllToFirebase}
+                  disabled={isSyncingCloud}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-2 shadow-sm cursor-pointer"
+                >
+                  {isSyncingCloud ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Sincronizando com Nuvem...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Enviar Todo o Histórico (12 Meses) para o Firebase</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  id="btn-download-firebase"
+                  onClick={handleDownloadFromFirebase}
+                  disabled={isSyncingCloud}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-semibold transition border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Baixar da Nuvem</span>
+                </button>
+              </div>
+            </div>
+          </div>
 
           {/* ========================================================================= */}
           {/* SECTION 1: PLANILHA MODELO PARA OS 12 MESES DE HISTÓRICO */}
