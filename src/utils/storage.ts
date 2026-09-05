@@ -1,10 +1,92 @@
 import { ClientProcess, ProcessStage } from '../types';
 import { INITIAL_PROCESSES } from '../data/defaultData';
 import { getFullDefaultChecklist } from './constants';
-import { formatCurrency } from './formatters';
+import { formatCurrency, parseMonthYearString } from './formatters';
 
 const STORAGE_KEY = 'morada_credito_processes_v1';
 const HAS_INITIALIZED_KEY = 'morada_credito_initialized_v1';
+
+/**
+ * Repairs a single process if it has inverted/shifted columns from a previous CSV import.
+ * Specifically handles the case where partnerRealtorName was put in estimatedIssuanceMonth,
+ * propertyCity was put in partnerRealtorName, and propertyState was put in propertyCity.
+ */
+export function repairProcessFields(p: ClientProcess): ClientProcess {
+  if (!p) return p;
+
+  const validMonth = parseMonthYearString(p.estimatedIssuanceMonth);
+
+  // If estimatedIssuanceMonth is NOT a valid month (e.g., contains a Realtor name like "Carlos Corretor" or "Imobiliária Alpha")
+  if (!validMonth) {
+    const rawRealtorNameCandidate = p.estimatedIssuanceMonth?.trim() || '';
+    const rawCityCandidate = p.partnerRealtorName?.trim() || '';
+    const rawStateCandidate = p.propertyCity?.trim() || '';
+
+    // The realtor name is the text that was misplaced in estimatedIssuanceMonth
+    const realRealtor = rawRealtorNameCandidate || 'Direto';
+
+    // The city is the text that was misplaced in partnerRealtorName
+    const realCity =
+      rawCityCandidate && rawCityCandidate !== 'Direto'
+        ? rawCityCandidate
+        : rawStateCandidate && rawStateCandidate.length > 2
+        ? rawStateCandidate
+        : 'São Paulo';
+
+    // The state is the 2-letter UF or default to 'SP'
+    const realState =
+      rawStateCandidate && rawStateCandidate.length === 2
+        ? rawStateCandidate.toUpperCase()
+        : p.propertyState && p.propertyState.length === 2
+        ? p.propertyState.toUpperCase()
+        : 'SP';
+
+    // Attempt to recover the actual month from createdAt, stageUpdatedAt, or default to recent
+    let recoveredMonth = '2026-08';
+    if (p.createdAt) {
+      const match = p.createdAt.match(/(\d{4})-(\d{2})/);
+      if (match) {
+        recoveredMonth = `${match[1]}-${match[2]}`;
+      }
+    }
+
+    return {
+      ...p,
+      estimatedIssuanceMonth: recoveredMonth,
+      partnerRealtorName: realRealtor,
+      propertyCity: realCity,
+      propertyState: realState,
+    };
+  }
+
+  // Also check if partnerRealtorName is a date and estimatedIssuanceMonth is a name
+  const realtorIsMonth = parseMonthYearString(p.partnerRealtorName);
+  if (realtorIsMonth && !validMonth) {
+    return {
+      ...p,
+      estimatedIssuanceMonth: realtorIsMonth,
+      partnerRealtorName: p.estimatedIssuanceMonth,
+    };
+  }
+
+  return p;
+}
+
+/**
+ * Repairs an array of processes and reports how many were corrected
+ */
+export function repairProcessesList(processes: ClientProcess[]): { repaired: ClientProcess[]; count: number } {
+  let count = 0;
+  const repaired = processes.map((p) => {
+    const isCorrupted = !parseMonthYearString(p.estimatedIssuanceMonth);
+    if (isCorrupted) {
+      count++;
+      return repairProcessFields(p);
+    }
+    return p;
+  });
+  return { repaired, count };
+}
 
 export function loadProcesses(): ClientProcess[] {
   try {
@@ -23,15 +105,18 @@ export function loadProcesses(): ClientProcess[] {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
         return parsed.map((p) => {
-          if (!p.creditAnalysisStatus) {
+          const repaired = repairProcessFields(p);
+          if (!repaired.creditAnalysisStatus) {
             const isAdvancedStage =
-              p.stage !== 'SIMULATION_COLLECTION' && p.stage !== 'CREDIT_ANALYSIS' && p.stage !== 'DECLINED_CANCELLED';
+              repaired.stage !== 'SIMULATION_COLLECTION' &&
+              repaired.stage !== 'CREDIT_ANALYSIS' &&
+              repaired.stage !== 'DECLINED_CANCELLED';
             return {
-              ...p,
+              ...repaired,
               creditAnalysisStatus: isAdvancedStage ? 'APROVADO' : 'EM_ANALISE',
             };
           }
-          return p;
+          return repaired;
         });
       }
     }
@@ -316,25 +401,383 @@ export function downloadHistorySpreadsheetTemplate(): void {
   document.body.removeChild(link);
 }
 
+/**
+ * Splits a CSV line into cells while respecting quotes and preserving empty fields (;; or ,,)
+ */
+export function parseCSVLine(line: string, separator: string): string[] {
+  const cells: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip escaped quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === separator && !inQuotes) {
+      cells.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current.trim());
+
+  return cells.map((cell) => {
+    let v = cell.trim();
+    if (v.startsWith('"') && v.endsWith('"')) {
+      v = v.substring(1, v.length - 1);
+    }
+    return v.trim();
+  });
+}
+
+function normalizeHeaderKey(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+interface ColumnMap {
+  clientName: number;
+  clientCpf: number;
+  clientPhone: number;
+  clientEmail: number;
+  creditType: number;
+  propertyValue: number;
+  financingValue: number;
+  downPaymentValue: number;
+  bank: number;
+  proposalNumber: number;
+  interestRateAnnual: number;
+  termMonths: number;
+  amortizationSystem: number;
+  commissionPercentage: number;
+  commissionAmount: number;
+  commissionStatus: number;
+  stage: number;
+  estimatedIssuanceMonth: number;
+  partnerRealtorName: number;
+  propertyCity: number;
+  propertyState: number;
+  registryOfficeName: number;
+  rgiProtocolNumber: number;
+}
+
+/**
+ * Dynamically resolves column indices based on header names (case/accent-insensitive).
+ * Supports standard template headers, export headers, and custom user spreadsheets.
+ */
+function resolveColumnIndices(headers: string[]): { map: ColumnMap; hasHeaders: boolean } {
+  const map: ColumnMap = {
+    clientName: -1,
+    clientCpf: -1,
+    clientPhone: -1,
+    clientEmail: -1,
+    creditType: -1,
+    propertyValue: -1,
+    financingValue: -1,
+    downPaymentValue: -1,
+    bank: -1,
+    proposalNumber: -1,
+    interestRateAnnual: -1,
+    termMonths: -1,
+    amortizationSystem: -1,
+    commissionPercentage: -1,
+    commissionAmount: -1,
+    commissionStatus: -1,
+    stage: -1,
+    estimatedIssuanceMonth: -1,
+    partnerRealtorName: -1,
+    propertyCity: -1,
+    propertyState: -1,
+    registryOfficeName: -1,
+    rgiProtocolNumber: -1,
+  };
+
+  let recognizedHeadersCount = 0;
+
+  headers.forEach((raw, idx) => {
+    const n = normalizeHeaderKey(raw);
+    if (!n) return;
+
+    // Realtor / Corretor Parceiro
+    if (
+      (n.includes('corretor') ||
+        n.includes('imobiliaria') ||
+        n.includes('origem') ||
+        n.includes('indicador') ||
+        (n.includes('parceiro') && !n.includes('banco'))) &&
+      !n.includes('comissao')
+    ) {
+      map.partnerRealtorName = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Mês e Ano de Fechamento / Previsão de Emissão
+    if (
+      n.includes('fechamento') ||
+      n.includes('previsao') ||
+      n.includes('emissao') ||
+      n.includes('mes e ano') ||
+      n.includes('mes ano') ||
+      n.includes('mes/ano') ||
+      n === 'mes' ||
+      n.includes('periodo')
+    ) {
+      map.estimatedIssuanceMonth = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Cidade do Imóvel
+    if (n.includes('cidade') || n.includes('municipio') || n.includes('localidade')) {
+      map.propertyCity = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // UF / Estado
+    if (n === 'uf' || n.includes('uf') || (n.includes('estado') && !n.includes('civil'))) {
+      map.propertyState = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Nome do Cliente
+    if (
+      n.includes('cliente') ||
+      n.includes('proponente') ||
+      n.includes('comprador') ||
+      (n.includes('nome') && !n.includes('corretor'))
+    ) {
+      if (map.clientName === -1) {
+        map.clientName = idx;
+        recognizedHeadersCount++;
+        return;
+      }
+    }
+
+    // CPF
+    if (n.includes('cpf') || n.includes('documento') || n.includes('cnpj')) {
+      map.clientCpf = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Telefone
+    if (
+      n.includes('telefone') ||
+      n.includes('celular') ||
+      n.includes('whatsapp') ||
+      n.includes('contato') ||
+      n === 'fone' ||
+      n === 'tel'
+    ) {
+      map.clientPhone = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Email
+    if (n.includes('email') || n.includes('e mail')) {
+      map.clientEmail = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Tipo de Crédito
+    if (
+      n.includes('tipo de credito') ||
+      n.includes('tipo credito') ||
+      n.includes('modalidade') ||
+      n.includes('produto') ||
+      (n.includes('tipo') && !n.includes('imovel'))
+    ) {
+      map.creditType = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Valor do Imóvel
+    if (
+      n.includes('valor do imovel') ||
+      n.includes('valor imovel') ||
+      n.includes('avaliacao') ||
+      n.includes('valor bem') ||
+      (n.includes('imovel') && n.includes('valor'))
+    ) {
+      map.propertyValue = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Valor Financiado
+    if (
+      n.includes('financiado') ||
+      n.includes('financiamento') ||
+      n.includes('vgv') ||
+      (n.includes('credito') && n.includes('valor'))
+    ) {
+      map.financingValue = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Entrada
+    if (n.includes('entrada') || n.includes('recurso proprio') || n.includes('recursos proprios')) {
+      map.downPaymentValue = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Banco
+    if (n.includes('banco') || n.includes('instituicao')) {
+      map.bank = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Número da Proposta
+    if (n.includes('proposta')) {
+      map.proposalNumber = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Taxa de Juros
+    if (n.includes('taxa') || n.includes('juros')) {
+      map.interestRateAnnual = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Prazo
+    if (n.includes('prazo') || n.includes('meses') || n.includes('parcelas')) {
+      map.termMonths = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Sistema Amortização
+    if (n.includes('amortizacao') || n.includes('sistema') || n.includes('price') || n.includes('sac')) {
+      map.amortizationSystem = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Percentual de Comissão
+    if (
+      n.includes('%') ||
+      (n.includes('comissao') && (n.includes('percentual') || n.includes('porcentagem') || n.includes('taxa')))
+    ) {
+      map.commissionPercentage = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Valor da Comissão
+    if (
+      n.includes('r$') ||
+      (n.includes('comissao') && (n.includes('valor') || n.includes('opcional') || n.includes('morada')))
+    ) {
+      map.commissionAmount = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Status da Comissão
+    if (n.includes('status') && n.includes('comissao')) {
+      map.commissionStatus = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Fase do Processo
+    if (n.includes('fase') || n.includes('etapa') || (n.includes('status') && !n.includes('comissao'))) {
+      map.stage = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Cartório RGI
+    if (n.includes('cartorio') || (n.includes('rgi') && !n.includes('protocolo'))) {
+      map.registryOfficeName = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+
+    // Protocolo RGI
+    if (n.includes('protocolo')) {
+      map.rgiProtocolNumber = idx;
+      recognizedHeadersCount++;
+      return;
+    }
+  });
+
+  const hasHeaders = recognizedHeadersCount >= 3;
+
+  // If positional template fallback is needed (no headers found):
+  if (!hasHeaders) {
+    map.clientName = 0;
+    map.clientCpf = 1;
+    map.clientPhone = 2;
+    map.clientEmail = 3;
+    map.creditType = 4;
+    map.propertyValue = 5;
+    map.financingValue = 6;
+    map.downPaymentValue = 7;
+    map.bank = 8;
+    map.proposalNumber = 9;
+    map.interestRateAnnual = 10;
+    map.termMonths = 11;
+    map.amortizationSystem = 12;
+    map.commissionPercentage = 13;
+    map.commissionAmount = 14;
+    map.commissionStatus = 15;
+    map.stage = 16;
+    map.estimatedIssuanceMonth = 17;
+    map.partnerRealtorName = 18;
+    map.propertyCity = 19;
+    map.propertyState = 20;
+  }
+
+  return { map, hasHeaders };
+}
+
 export function parseProcessesFromCSV(csvText: string): { success: boolean; processes: ClientProcess[]; errors: string[] } {
   try {
-    const lines = csvText.split(/\r\n|\n|\r/).filter((l) => l.trim().length > 0);
-    if (lines.length < 2) {
+    const rawLines = csvText.split(/\r\n|\n|\r/).map((l) => l.trim()).filter((l) => l.length > 0);
+    if (rawLines.length < 2) {
       return { success: false, processes: [], errors: ['O arquivo CSV está vazio ou contém apenas o cabeçalho.'] };
     }
 
-    const separator = lines[0].includes(';') ? ';' : ',';
-    const cleanCell = (cell: string) => {
-      let val = cell ? cell.trim() : '';
-      if (val.startsWith('"') && val.endsWith('"')) {
-        val = val.substring(1, val.length - 1);
-      }
-      return val.trim();
-    };
+    // Detect delimiter from first line (; or , or \t)
+    const headerLine = rawLines[0];
+    const countSemi = (headerLine.match(/;/g) || []).length;
+    const countComma = (headerLine.match(/,/g) || []).length;
+    const countTab = (headerLine.match(/\t/g) || []).length;
 
-    const parseNumber = (cell: string, defaultVal: number = 0): number => {
+    let separator = ';';
+    if (countTab > countSemi && countTab > countComma) separator = '\t';
+    else if (countComma > countSemi) separator = ',';
+
+    const headerCells = parseCSVLine(headerLine, separator);
+    const { map, hasHeaders } = resolveColumnIndices(headerCells);
+
+    const parseNumber = (cell: string | undefined, defaultVal: number = 0): number => {
       if (!cell) return defaultVal;
-      let clean = cleanCell(cell).replace('R$', '').replace(/\s/g, '');
+      let clean = cell.replace('R$', '').replace(/\s/g, '');
       // Format 500.000,00 -> 500000.00
       if (clean.includes('.') && clean.includes(',')) {
         clean = clean.replace(/\./g, '').replace(',', '.');
@@ -348,50 +791,72 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
     const processes: ClientProcess[] = [];
     const errors: string[] = [];
 
-    // Skip header line
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i];
+    // Start from row 1 if row 0 was headers, else row 0
+    const startIdx = hasHeaders ? 1 : 0;
+
+    for (let i = startIdx; i < rawLines.length; i++) {
+      const line = rawLines[i];
       if (!line.trim()) continue;
 
-      // Handle split by separator while preserving quoted content
-      const regex = new RegExp(`(?:"[^"]*"|[^"${separator}])+`, 'g');
-      const cells = line.match(regex)?.map((c) => cleanCell(c)) || line.split(separator).map(cleanCell);
+      const cells = parseCSVLine(line, separator);
 
-      if (cells.length < 5) {
-        errors.push(`Linha ${i + 1}: Quantidade insuficiente de colunas.`);
+      if (cells.length < 3) {
+        errors.push(`Linha ${i + 1}: Linha ignorada por não conter colunas suficientes.`);
         continue;
       }
 
-      const clientName = cells[0] || `Cliente Linha ${i + 1}`;
-      const clientCpf = cells[1] || '';
-      const clientPhone = cells[2] || '';
-      const clientEmail = cells[3] || '';
-      
-      const rawCreditType = (cells[4] || 'AQUISICAO_RESIDENCIAL').toUpperCase();
-      const creditType: any = ['AQUISICAO_RESIDENCIAL', 'AQUISICAO_COMERCIAL', 'HOME_EQUITY', 'CONSTRUCAO_REFORMA', 'PORTABILIDADE'].includes(rawCreditType)
+      const getCell = (idx: number, fallback = ''): string => {
+        if (idx >= 0 && idx < cells.length && cells[idx] !== undefined) {
+          return cells[idx].trim();
+        }
+        return fallback;
+      };
+
+      const clientName = getCell(map.clientName, `Cliente Linha ${i + 1}`);
+      const clientCpf = getCell(map.clientCpf, '');
+      const clientPhone = getCell(map.clientPhone, '');
+      const clientEmail = getCell(map.clientEmail, '');
+
+      const rawCreditType = getCell(map.creditType, 'AQUISICAO_RESIDENCIAL').toUpperCase();
+      const creditType: any = [
+        'AQUISICAO_RESIDENCIAL',
+        'AQUISICAO_COMERCIAL',
+        'HOME_EQUITY',
+        'CONSTRUCAO_REFORMA',
+        'PORTABILIDADE',
+      ].includes(rawCreditType)
         ? rawCreditType
         : 'AQUISICAO_RESIDENCIAL';
 
-      const propertyValue = parseNumber(cells[5], 0);
-      const financingValue = parseNumber(cells[6], propertyValue * 0.8);
-      const downPaymentValue = parseNumber(cells[7], Math.max(0, propertyValue - financingValue));
-      
-      const rawBank = cells[8] || 'Itaú Unibanco';
-      const bank: any = rawBank;
-      const proposalNumber = cells[9] || '';
-      const interestRateAnnual = parseNumber(cells[10], 10.49);
-      const termMonths = parseNumber(cells[11], 360);
-      const amortizationSystem: any = (cells[12] || 'SAC').toUpperCase().includes('PRICE') ? 'PRICE' : 'SAC';
-      
-      const commissionPercentage = parseNumber(cells[13], 1.25);
-      const commissionAmount = cells[14] ? parseNumber(cells[14], (financingValue * commissionPercentage) / 100) : (financingValue * commissionPercentage) / 100;
+      const propertyValue = parseNumber(getCell(map.propertyValue), 0);
+      const financingValue = parseNumber(getCell(map.financingValue), propertyValue > 0 ? propertyValue * 0.8 : 0);
+      const downPaymentValue = parseNumber(
+        getCell(map.downPaymentValue),
+        Math.max(0, propertyValue - financingValue)
+      );
 
-      const rawCommissionStatus = (cells[15] || 'PAGA').toUpperCase();
-      const commissionStatus: any = ['PAGA', 'DISPONIVEL_FATURAMENTO', 'PREVISTA', 'CANCELADA'].includes(rawCommissionStatus)
+      const rawBank = getCell(map.bank, 'Itaú Unibanco');
+      const bank: any = rawBank || 'Itaú Unibanco';
+      const proposalNumber = getCell(map.proposalNumber, '');
+      const interestRateAnnual = parseNumber(getCell(map.interestRateAnnual), 10.49);
+      const termMonths = parseNumber(getCell(map.termMonths), 360);
+      const amortizationSystem: any = getCell(map.amortizationSystem, 'SAC').toUpperCase().includes('PRICE')
+        ? 'PRICE'
+        : 'SAC';
+
+      const commissionPercentage = parseNumber(getCell(map.commissionPercentage), 1.25);
+      const commissionAmount = getCell(map.commissionAmount)
+        ? parseNumber(getCell(map.commissionAmount), (financingValue * commissionPercentage) / 100)
+        : (financingValue * commissionPercentage) / 100;
+
+      const rawCommissionStatus = getCell(map.commissionStatus, 'PAGA').toUpperCase();
+      const commissionStatus: any = ['PAGA', 'DISPONIVEL_FATURAMENTO', 'PREVISTA', 'CANCELADA'].includes(
+        rawCommissionStatus
+      )
         ? rawCommissionStatus
         : 'PAGA';
 
-      const rawStage = (cells[16] || 'COMMISSION_PAID').toUpperCase();
+      const rawStage = getCell(map.stage, 'COMMISSION_PAID').toUpperCase();
       const stage: any = [
         'SIMULATION_COLLECTION',
         'CREDIT_ANALYSIS',
@@ -407,22 +872,66 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
         ? rawStage
         : 'COMMISSION_PAID';
 
-      // Year-Month format: YYYY-MM
-      let estimatedIssuanceMonth = cells[17] || '2026-08';
-      if (estimatedIssuanceMonth.includes('/')) {
-        // e.g. 08/2025 -> 2025-08
-        const parts = estimatedIssuanceMonth.split('/');
-        if (parts.length === 2) {
-          estimatedIssuanceMonth = `${parts[1]}-${parts[0].padStart(2, '0')}`;
+      // =========================================================================
+      // SMART RESOLUTION & DISAMBIGUATION:
+      // Mês e Ano de Fechamento / Corretor Parceiro / Cidade / UF
+      // =========================================================================
+      let rawMonthCandidate = getCell(map.estimatedIssuanceMonth);
+      let rawRealtorCandidate = getCell(map.partnerRealtorName);
+      let rawCityCandidate = getCell(map.propertyCity);
+      let rawStateCandidate = getCell(map.propertyState);
+
+      // 1. Detect if rawMonthCandidate is an actual month/date
+      let resolvedMonth = parseMonthYearString(rawMonthCandidate);
+
+      // 2. If rawMonthCandidate is NOT a date, could it be swapped with Realtor?
+      if (!resolvedMonth) {
+        const realtorAsMonth = parseMonthYearString(rawRealtorCandidate);
+        if (realtorAsMonth) {
+          // They were swapped! Realtor cell had the month, Month cell had the Realtor!
+          resolvedMonth = realtorAsMonth;
+          rawRealtorCandidate = rawMonthCandidate;
+        } else {
+          // Search other cells in this line for any valid month pattern (e.g. 2025-09 or 09/2025)
+          for (let cIdx = 0; cIdx < cells.length; cIdx++) {
+            const possibleMonth = parseMonthYearString(cells[cIdx]);
+            if (possibleMonth) {
+              resolvedMonth = possibleMonth;
+              break;
+            }
+          }
         }
       }
 
-      const partnerRealtorName = cells[18] || '';
-      const propertyCity = cells[19] || 'São Paulo';
-      const propertyState = cells[20] || 'SP';
+      // 3. If rawMonthCandidate had a Realtor name (e.g. "Carlos Corretor"), and rawRealtorCandidate was empty or had city:
+      if (!parseMonthYearString(rawMonthCandidate) && rawMonthCandidate && !rawRealtorCandidate) {
+        rawRealtorCandidate = rawMonthCandidate;
+      }
+
+      // 4. Default month if still not resolved
+      if (!resolvedMonth) {
+        resolvedMonth = '2026-08';
+      }
+
+      // 5. Clean Realtor Name
+      let partnerRealtorName = rawRealtorCandidate || '';
+      if (parseMonthYearString(partnerRealtorName)) {
+        // If partnerRealtorName was set to a month, clear it or set to 'Direto'
+        partnerRealtorName = '';
+      }
+
+      // 6. Clean City and State
+      let propertyCity = rawCityCandidate || 'São Paulo';
+      let propertyState = rawStateCandidate || 'SP';
+
+      // If state was put in city (e.g. City is 'SP' and State is empty)
+      if (propertyCity.length === 2 && propertyCity.toUpperCase() === propertyCity && !rawStateCandidate) {
+        propertyState = propertyCity;
+        propertyCity = 'São Paulo';
+      }
 
       const id = `proc_import_${Date.now()}_${i}`;
-      const createdAt = `${estimatedIssuanceMonth}-15T10:00:00Z`;
+      const createdAt = `${resolvedMonth}-15T10:00:00Z`;
 
       processes.push({
         id,
@@ -442,18 +951,21 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
         commissionPercentage,
         commissionAmount,
         commissionStatus,
-        estimatedIssuanceMonth,
+        estimatedIssuanceMonth: resolvedMonth,
         propertyCity,
         propertyState,
         stage,
-        partnerRealtorName,
+        partnerRealtorName: partnerRealtorName || undefined,
         stageUpdatedAt: createdAt,
         createdAt,
         priority: 'NORMAL',
+        creditAnalysisStatus: ['DISBURSEMENT_COMPLETED', 'COMMISSION_PAID'].includes(stage)
+          ? 'APROVADO'
+          : 'EM_ANALISE',
         notes: [
           {
             id: `note_${id}_1`,
-            text: `Registro importado da planilha de histórico (${estimatedIssuanceMonth}).`,
+            text: `Registro importado da planilha de histórico (${resolvedMonth}).`,
             createdAt,
             author: 'Importação de Histórico',
             category: 'GERAL',
@@ -501,10 +1013,14 @@ export function getAvailableMonths(processes: ClientProcess[]): string[] {
   const monthsSet = new Set<string>();
   processes.forEach((p) => {
     if (p.estimatedIssuanceMonth) {
-      monthsSet.add(p.estimatedIssuanceMonth);
+      const parsed = parseMonthYearString(p.estimatedIssuanceMonth);
+      if (parsed) {
+        monthsSet.add(parsed);
+      }
     }
   });
-  // Add current and next 2 months
+
+  // Add current and surrounding 3 months
   const today = new Date();
   for (let i = -1; i <= 3; i++) {
     const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
@@ -512,5 +1028,6 @@ export function getAvailableMonths(processes: ClientProcess[]): string[] {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     monthsSet.add(`${yyyy}-${mm}`);
   }
+
   return Array.from(monthsSet).sort();
 }

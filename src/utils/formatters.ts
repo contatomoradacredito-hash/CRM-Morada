@@ -76,9 +76,77 @@ export function formatDateWithTime(isoString: string | undefined | null): string
   }
 }
 
+const MONTH_NAMES_MAP: Record<string, string> = {
+  jan: '01', janeiro: '01',
+  fev: '02', fevereiro: '02',
+  mar: '03', marco: '03', março: '03',
+  abr: '04', abril: '04',
+  mai: '05', maio: '05',
+  jun: '06', junho: '06',
+  jul: '07', julho: '07',
+  ago: '08', agosto: '08',
+  set: '09', setembro: '09',
+  out: '10', outubro: '10',
+  nov: '11', novembro: '11',
+  dez: '12', dezembro: '12',
+};
+
+/**
+ * Extracts and normalizes a year-month string (YYYY-MM) from diverse user inputs
+ * (e.g., '2025-09', '09/2025', '9/2025', 'Setembro/2025', 'Set/2025', '2025/09').
+ * Returns null if the value is not a valid month/year (e.g., a person's name or city).
+ */
+export function parseMonthYearString(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const clean = raw.trim();
+  if (!clean) return null;
+
+  // Check YYYY-MM or YYYY/MM (e.g., 2025-09, 2026-08, 2025/09)
+  const isoMatch = clean.match(/^(\d{4})[-/.](\d{1,2})$/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    if (year >= 2000 && year <= 2040 && month >= 1 && month <= 12) {
+      return `${year}-${String(month).padStart(2, '0')}`;
+    }
+  }
+
+  // Check MM/YYYY or MM-YYYY (e.g., 09/2025, 9/2025, 12-2025)
+  const brMatch = clean.match(/^(\d{1,2})[-/.](\d{4})$/);
+  if (brMatch) {
+    const month = parseInt(brMatch[1], 10);
+    const year = parseInt(brMatch[2], 10);
+    if (year >= 2000 && year <= 2040 && month >= 1 && month <= 12) {
+      return `${year}-${String(month).padStart(2, '0')}`;
+    }
+  }
+
+  // Check text format: e.g. "Setembro/2025", "Set/2025", "Setembro de 2025", "set-2025"
+  const textMatch = clean.match(/([a-zA-ZçÇãÃáÁéÉíÍóÓúÚ]+)[^\d]*(\d{4})/);
+  if (textMatch) {
+    const word = textMatch[1]
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    const year = parseInt(textMatch[2], 10);
+    if (year >= 2000 && year <= 2040) {
+      for (const [key, num] of Object.entries(MONTH_NAMES_MAP)) {
+        if (word.startsWith(key)) {
+          return `${year}-${num}`;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 export function formatMonthYear(yyyyMm: string): string {
-  if (!yyyyMm || !yyyyMm.includes('-')) return yyyyMm;
-  const [year, month] = yyyyMm.split('-');
+  if (!yyyyMm) return '-';
+  const parsed = parseMonthYearString(yyyyMm);
+  if (!parsed) return yyyyMm; // Fallback to raw string if cannot parse
+
+  const [year, month] = parsed.split('-');
   const monthNames = [
     'Janeiro',
     'Fevereiro',

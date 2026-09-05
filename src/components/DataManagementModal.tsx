@@ -25,8 +25,9 @@ import {
   reloadDefaultProcesses,
   downloadHistorySpreadsheetTemplate,
   parseProcessesFromCSV,
+  repairProcessesList,
 } from '../utils/storage';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, parseMonthYearString } from '../utils/formatters';
 
 interface DataManagementModalProps {
   isOpen: boolean;
@@ -116,11 +117,11 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
 
         if (importMode === 'replace') {
           onUpdateProcesses(result.processes);
-          showToast(`${result.processes.length} processos dos 12 meses importados com sucesso substituindo a base!`);
+          showToast(`${result.processes.length} processos dos 12 meses importados com sucesso com colunas de Corretor, Mês e Cidade alinhadas!`);
         } else {
           const merged = [...processes, ...result.processes];
           onUpdateProcesses(merged);
-          showToast(`${result.processes.length} processos dos 12 meses adicionados à base existente!`);
+          showToast(`${result.processes.length} processos dos 12 meses adicionados à base com mapeamento inteligente de colunas!`);
         }
         onClose();
       } catch (err: any) {
@@ -128,6 +129,14 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
       }
     };
     reader.readAsText(file, 'UTF-8');
+  };
+
+  const corruptedCount = processes.filter((p) => !parseMonthYearString(p.estimatedIssuanceMonth)).length;
+
+  const handleAutoRepair = () => {
+    const { repaired, count } = repairProcessesList(processes);
+    onUpdateProcesses(repaired);
+    showToast(`${count} processo(s) corrigido(s) com sucesso! As colunas de Corretor, Previsão de Emissão e Cidade foram devidamente realinhadas.`);
   };
 
   const augustCount = processes.filter((p) => p.estimatedIssuanceMonth === '2026-08').length;
@@ -147,7 +156,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
                 Importação de Histórico & Gestão da Base de Dados
               </h3>
               <p className="text-xs text-slate-400">
-                Planilha modelo para os 12 meses de empresa e controle completo de lançamentos
+                Planilha modelo para os 12 meses de empresa com mapeamento inteligente de colunas
               </p>
             </div>
           </div>
@@ -162,6 +171,33 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-5 sm:p-6 space-y-6 overflow-y-auto bg-slate-50/50">
+          {/* Corrupted columns repair banner */}
+          {corruptedCount > 0 && (
+            <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-amber-900 uppercase">
+                    Detectamos {corruptedCount} processo(s) com colunas deslocadas da importação anterior
+                  </h4>
+                  <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+                    O Nome do Corretor estava sendo exibido na Previsão de Emissão e a Cidade no Corretor. Clique ao lado para reajustar tudo automaticamente!
+                  </p>
+                </div>
+              </div>
+              <button
+                id="btn-auto-repair-columns"
+                onClick={handleAutoRepair}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition flex items-center gap-2 shrink-0 cursor-pointer shadow-xs"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Reajustar Colunas Agora</span>
+              </button>
+            </div>
+          )}
+
           {/* Current Status Overview */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs text-center">
@@ -287,20 +323,20 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] leading-relaxed">
                   <div>
-                    <strong className="text-white block mb-1">📅 Mês e Ano (AAAA-MM):</strong>
-                    Coloque no formato <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">2025-09</code> até <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">2026-08</code>. O gráfico anual e o painel financeiro consolidam automaticamente!
+                    <strong className="text-white block mb-1">📅 Mês e Ano de Fechamento:</strong>
+                    Aceita <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">2025-09</code>, <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">09/2025</code> ou <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">Setembro/2025</code>. O importador mapeia pelo cabeçalho independentemente da posição!
                   </div>
                   <div>
-                    <strong className="text-white block mb-1">🏦 Bancos Suportados:</strong>
-                    Itaú Unibanco, Caixa Econômica Federal, Bradesco, Santander, Banco Inter, Banco Bari (Home Equity).
+                    <strong className="text-white block mb-1">🤝 Corretor Parceiro & Origem:</strong>
+                    Identificado por colunas com <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">Corretor</code>, <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">Imobiliária</code> ou <code className="bg-slate-800 px-1 py-0.5 rounded text-emerald-300">Origem</code>. Não será mais confundido com data ou cidade.
                   </div>
                   <div>
-                    <strong className="text-white block mb-1">💰 Valores Financeiros:</strong>
-                    Aceita números diretos (<code className="bg-slate-800 px-1 py-0.5 rounded text-indigo-300">550000</code>) ou formatados (<code className="bg-slate-800 px-1 py-0.5 rounded text-indigo-300">R$ 550.000,00</code>).
+                    <strong className="text-white block mb-1">📍 Cidade & UF:</strong>
+                    Colunas como <code className="bg-slate-800 px-1 py-0.5 rounded text-indigo-300">Cidade do Imóvel</code> e <code className="bg-slate-800 px-1 py-0.5 rounded text-indigo-300">UF</code> são isoladas perfeitamente para sua métrica regional.
                   </div>
                   <div>
-                    <strong className="text-white block mb-1">🎯 Fases Principais:</strong>
-                    Use <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">COMMISSION_PAID</code> para contratos concluídos com comissão recebida, ou <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">DISBURSEMENT_COMPLETED</code> para recursos liberados.
+                    <strong className="text-white block mb-1">💰 Valores Financeiros & Fases:</strong>
+                    Aceita <code className="bg-slate-800 px-1 py-0.5 rounded text-indigo-300">R$ 550.000,00</code> e fases como <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">COMMISSION_PAID</code> ou <code className="bg-slate-800 px-1 py-0.5 rounded text-amber-300">DISBURSEMENT_COMPLETED</code>.
                   </div>
                 </div>
               </div>

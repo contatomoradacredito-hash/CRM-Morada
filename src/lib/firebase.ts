@@ -21,6 +21,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { ClientProcess } from '../types';
+import { repairProcessFields } from '../utils/storage';
 
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -73,13 +74,14 @@ export function mergeProcessesLists(
   // Add all local processes first
   for (const proc of localList) {
     if (proc && proc.id) {
-      map.set(proc.id, proc);
+      map.set(proc.id, repairProcessFields(proc));
     }
   }
 
   // Merge cloud processes: take cloud version if newer or not present locally
-  for (const cloudProc of cloudList) {
-    if (!cloudProc || !cloudProc.id) continue;
+  for (const rawCloudProc of cloudList) {
+    if (!rawCloudProc || !rawCloudProc.id) continue;
+    const cloudProc = repairProcessFields(rawCloudProc);
     const existing = map.get(cloudProc.id);
     if (!existing) {
       map.set(cloudProc.id, cloudProc);
@@ -93,7 +95,7 @@ export function mergeProcessesLists(
     }
   }
 
-  return Array.from(map.values());
+  return Array.from(map.values()).map(repairProcessFields);
 }
 
 /**
