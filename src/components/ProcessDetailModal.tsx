@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Building,
@@ -91,10 +91,14 @@ export const ProcessDetailModal: React.FC<ProcessDetailModalProps> = ({
   onOpenWhatsApp,
   onAdvanceStage,
 }) => {
-  if (!process) return null;
-
   const [activeTab, setActiveTab] = useState<'details' | 'checklist' | 'history' | 'notes' | 'financial'>('details');
-  const [formData, setFormData] = useState<ClientProcess>({ ...process });
+  const [formData, setFormData] = useState<ClientProcess>(() => process || ({} as ClientProcess));
+
+  useEffect(() => {
+    if (process) {
+      setFormData({ ...process });
+    }
+  }, [process]);
   
   // Notes State
   const [newNoteText, setNewNoteText] = useState<string>('');
@@ -311,6 +315,8 @@ export const ProcessDetailModal: React.FC<ProcessDetailModalProps> = ({
     }
     return true;
   });
+
+  if (!process || !formData?.id) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-1.5 sm:p-3 lg:p-4">

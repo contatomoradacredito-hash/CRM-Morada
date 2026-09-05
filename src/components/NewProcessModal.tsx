@@ -28,8 +28,6 @@ export const NewProcessModal: React.FC<NewProcessModalProps> = ({
   onSave,
   initialData,
 }) => {
-  if (!isOpen) return null;
-
   const currentYear = new Date().getFullYear();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
   const defaultMonthStr = `${currentYear}-${currentMonth}`;
@@ -168,6 +166,8 @@ export const NewProcessModal: React.FC<NewProcessModalProps> = ({
     onSave(newProc);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">

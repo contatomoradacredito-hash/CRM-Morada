@@ -56,8 +56,6 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   onOpenNewProcessWithMonth,
   showToast,
 }) => {
-  if (!isOpen) return null;
-
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
@@ -199,6 +197,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
 
   const augustCount = processes.filter((p) => p.estimatedIssuanceMonth === '2026-08').length;
   const septemberCount = processes.filter((p) => p.estimatedIssuanceMonth === '2026-09').length;
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">

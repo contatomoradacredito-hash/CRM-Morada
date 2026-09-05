@@ -391,26 +391,30 @@ function CRMApp() {
       )}
 
       {/* New Process Creation Modal */}
-      <NewProcessModal
-        isOpen={isNewProcessModalOpen}
-        onClose={() => setIsNewProcessModalOpen(false)}
-        onSave={handleCreateProcess}
-        initialData={newProcessInitialData}
-      />
+      {isNewProcessModalOpen && (
+        <NewProcessModal
+          isOpen={isNewProcessModalOpen}
+          onClose={() => setIsNewProcessModalOpen(false)}
+          onSave={handleCreateProcess}
+          initialData={newProcessInitialData}
+        />
+      )}
 
       {/* Data Management & Reset Modal */}
-      <DataManagementModal
-        isOpen={isDataManagementModalOpen}
-        onClose={() => setIsDataManagementModalOpen(false)}
-        processes={processes}
-        onUpdateProcesses={(updated) => {
-          setProcesses(updated);
-          saveProcesses(updated);
-          syncProcessesToFirestore(updated).catch(() => {});
-        }}
-        onOpenNewProcessWithMonth={handleOpenNewProcessWithMonth}
-        showToast={showToast}
-      />
+      {isDataManagementModalOpen && (
+        <DataManagementModal
+          isOpen={isDataManagementModalOpen}
+          onClose={() => setIsDataManagementModalOpen(false)}
+          processes={processes}
+          onUpdateProcesses={(updated) => {
+            setProcesses(updated);
+            saveProcesses(updated);
+            syncProcessesToFirestore(updated).catch(() => {});
+          }}
+          onOpenNewProcessWithMonth={handleOpenNewProcessWithMonth}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 }
