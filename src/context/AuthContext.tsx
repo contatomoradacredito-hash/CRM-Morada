@@ -24,10 +24,26 @@ export interface CRMUser {
   providerId?: string;
 }
 
+// Pre-defined authorized CRM administrators
+export const AUTHORIZED_ADMIN_EMAILS = [
+  'deiglisonlima@gmail.com',
+  'lima@moradacredito.com',
+];
+
+export const PRIMARY_ADMIN_EMAIL = 'deiglisonlima@gmail.com';
+export const SECONDARY_ADMIN_EMAIL = 'lima@moradacredito.com';
+
+export function isAuthorizedAdmin(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return AUTHORIZED_ADMIN_EMAILS.some((adm) => adm.toLowerCase() === clean);
+}
+
 interface AuthContextType {
   user: CRMUser | null;
   firebaseUser: User | null;
   loading: boolean;
+  authorizedEmails: string[];
   login: (email: string, pass: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   register: (email: string, pass: string, name: string) => Promise<void>;
@@ -45,17 +61,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Listen directly to live Firebase Auth state
-    const unsubscribe = onAuthStateChanged(auth, (currentFbUser) => {
-      setFirebaseUser(currentFbUser);
+    // Listen directly to live Firebase Auth state and verify administrator authorization
+    const unsubscribe = onAuthStateChanged(auth, async (currentFbUser) => {
       if (currentFbUser) {
+        const userEmail = currentFbUser.email?.toLowerCase() || '';
+        
+        // Strict guard: verify user belongs to pre-defined CRM Administrator accounts
+        if (!isAuthorizedAdmin(userEmail)) {
+          console.warn(`Tentativa de acesso com e-mail não autorizado: ${userEmail}`);
+          await firebaseSignOut(auth);
+          setUser(null);
+          setFirebaseUser(null);
+          setLoading(false);
+          return;
+        }
+
+        setFirebaseUser(currentFbUser);
         const crmUser: CRMUser = {
           uid: currentFbUser.uid,
           email: currentFbUser.email || '',
           displayName:
             currentFbUser.displayName ||
-            currentFbUser.email?.split('@')[0] ||
-            'Administrador Morada',
+            (userEmail.includes('lima') ? 'Deiglison Lima' : 'Administrador Morada'),
           role: 'ADMIN',
           photoURL: currentFbUser.photoURL || undefined,
           providerId: currentFbUser.providerData?.[0]?.providerId || 'password',
@@ -63,6 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(crmUser);
       } else {
         setUser(null);
+        setFirebaseUser(null);
       }
       setLoading(false);
     });
@@ -71,23 +99,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   /**
-   * Login using Firebase Authentication email and password
+   * Login using Firebase Authentication email and password.
+   * Only pre-defined CRM Administrators are allowed.
    */
   const login = async (email: string, pass: string) => {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !pass) {
-      throw new Error('Informe o e-mail e a senha para acessar.');
+      throw new Error('Informe o e-mail e a senha de administrador.');
     }
+
+    // Pre-check authorization before attempt
+    if (!isAuthorizedAdmin(cleanEmail)) {
+      throw new Error(
+        'Acesso restrito. Este sistema é de uso exclusivo do Administrador pré-definido (Deiglison Lima).'
+      );
+    }
+
     const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
     if (cred.user) {
+      const userEmail = cred.user.email?.toLowerCase() || '';
+      if (!isAuthorizedAdmin(userEmail)) {
+        await firebaseSignOut(auth);
+        throw new Error('Acesso restrito. O e-mail autenticado não possui privilégios de Administrador.');
+      }
+
       setFirebaseUser(cred.user);
       setUser({
         uid: cred.user.uid,
         email: cred.user.email || cleanEmail,
         displayName:
-          cred.user.displayName ||
-          cred.user.email?.split('@')[0] ||
-          'Administrador Morada',
+          cred.user.displayName || 'Deiglison Lima',
         role: 'ADMIN',
         photoURL: cred.user.photoURL || undefined,
         providerId: cred.user.providerData?.[0]?.providerId || 'password',
@@ -96,18 +137,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Login using Firebase Google Authentication
+   * Login using Firebase Google Authentication.
+   * Only pre-defined CRM Administrators are allowed.
    */
   const loginWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     const cred = await signInWithPopup(auth, provider);
     if (cred.user) {
+      const userEmail = cred.user.email?.toLowerCase() || '';
+      if (!isAuthorizedAdmin(userEmail)) {
+        await firebaseSignOut(auth);
+        throw new Error(
+          `Acesso restrito. A conta Google (${userEmail}) não é o Administrador autorizado do CRM Morada Crédito.`
+        );
+      }
+
       setFirebaseUser(cred.user);
       setUser({
         uid: cred.user.uid,
-        email: cred.user.email || '',
-        displayName: cred.user.displayName || 'Administrador Morada',
+        email: cred.user.email || userEmail,
+        displayName: cred.user.displayName || 'Deiglison Lima',
         role: 'ADMIN',
         photoURL: cred.user.photoURL || undefined,
         providerId: 'google.com',
@@ -116,14 +166,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Create account using Firebase Authentication
+   * Initial administrator setup in Firebase Authentication (restricted to authorized admin emails)
    */
   const register = async (email: string, pass: string, name: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    const cleanName = name.trim() || cleanEmail.split('@')[0];
+    const cleanName = name.trim() || 'Deiglison Lima';
 
     if (!cleanEmail || !pass) {
-      throw new Error('Informe o e-mail e uma senha para cadastro.');
+      throw new Error('Informe o e-mail e uma senha para cadastro inicial do administrador.');
+    }
+    if (!isAuthorizedAdmin(cleanEmail)) {
+      throw new Error('Apenas os e-mails pré-definidos do Administrador podem ser cadastrados no CRM.');
     }
     if (pass.length < 6) {
       throw new Error('A senha deve ter no mínimo 6 caracteres.');
@@ -131,13 +184,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
     if (cred.user) {
-      if (cleanName) {
-        try {
-          await updateProfile(cred.user, { displayName: cleanName });
-        } catch (e) {
-          console.warn('Erro ao atualizar perfil do Firebase Auth:', e);
-        }
+      try {
+        await updateProfile(cred.user, { displayName: cleanName });
+      } catch (e) {
+        console.warn('Erro ao atualizar perfil do Firebase Auth:', e);
       }
+
       setFirebaseUser(cred.user);
       setUser({
         uid: cred.user.uid,
@@ -165,7 +217,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resetPassword = async (email: string) => {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
-      throw new Error('Informe o e-mail para envio do link de redefinição.');
+      throw new Error('Informe o e-mail do administrador para envio do link de redefinição.');
+    }
+    if (!isAuthorizedAdmin(cleanEmail)) {
+      throw new Error('O e-mail informado não pertence ao Administrador do CRM.');
     }
     await sendPasswordResetEmail(auth, cleanEmail);
   };
@@ -176,7 +231,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const changePassword = async (currentPassword: string, newPassword: string) => {
     const activeUser = auth.currentUser;
     if (!activeUser) {
-      throw new Error('Nenhum usuário autenticado no Firebase.');
+      throw new Error('Nenhum usuário administrador autenticado no Firebase.');
     }
     if (!newPassword || newPassword.length < 6) {
       throw new Error('A nova senha deve conter pelo menos 6 caracteres.');
@@ -203,12 +258,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Send password reset email for currently logged in user
+   * Send password reset email for currently logged in administrator
    */
   const sendPasswordResetForCurrentUser = async () => {
     const activeUser = auth.currentUser;
     if (!activeUser || !activeUser.email) {
-      throw new Error('Usuário não possui e-mail cadastrado.');
+      throw new Error('Administrador não possui e-mail cadastrado.');
     }
     await sendPasswordResetEmail(auth, activeUser.email);
   };
@@ -219,6 +274,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         firebaseUser,
         loading,
+        authorizedEmails: AUTHORIZED_ADMIN_EMAILS,
         login,
         loginWithGoogle,
         register,
