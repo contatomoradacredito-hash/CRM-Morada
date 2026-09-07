@@ -6,7 +6,13 @@ import {
   createUserWithEmailAndPassword,
   firebaseSignOut,
   updateProfile,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  GoogleAuthProvider,
+  signInWithPopup,
   sendPasswordResetEmail,
+  User,
 } from '../lib/firebase';
 
 export interface CRMUser {
@@ -14,291 +20,212 @@ export interface CRMUser {
   email: string;
   displayName: string;
   role?: string;
-}
-
-interface StoredUserAccount {
-  uid: string;
-  email: string;
-  passwordHash: string;
-  displayName: string;
-  createdAt: string;
+  photoURL?: string;
+  providerId?: string;
 }
 
 interface AuthContextType {
   user: CRMUser | null;
+  firebaseUser: User | null;
   loading: boolean;
   login: (email: string, pass: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   register: (email: string, pass: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  loginAsDemo: () => Promise<void>;
-}
-
-const SESSION_STORAGE_KEY = 'morada_crm_auth_session_v2';
-const USERS_DB_KEY = 'morada_crm_registered_users_v2';
-
-// Master Administrator credentials for Morada Crédito
-const MASTER_ADMIN_EMAIL = 'lima@moradacredito.com';
-const MASTER_ADMIN_PASS = 'Degos*592623';
-
-const MASTER_ADMIN_USER: StoredUserAccount = {
-  uid: 'morada_master_admin_lima',
-  email: MASTER_ADMIN_EMAIL,
-  passwordHash: MASTER_ADMIN_PASS,
-  displayName: 'Deiglison Lima',
-  createdAt: new Date().toISOString(),
-};
-
-const SECONDARY_ADMIN_USER: StoredUserAccount = {
-  uid: 'morada_master_admin_deiglison',
-  email: 'deiglisonlima@gmail.com',
-  passwordHash: MASTER_ADMIN_PASS,
-  displayName: 'Deiglison Lima',
-  createdAt: new Date().toISOString(),
-};
-
-function getStoredUsers(): StoredUserAccount[] {
-  try {
-    const raw = localStorage.getItem(USERS_DB_KEY);
-    if (!raw) {
-      const initial = [MASTER_ADMIN_USER, SECONDARY_ADMIN_USER];
-      localStorage.setItem(USERS_DB_KEY, JSON.stringify(initial));
-      return initial;
-    }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      // Ensure master admin accounts exist
-      let updated = false;
-      if (!parsed.some((u) => u.email.toLowerCase() === MASTER_ADMIN_USER.email.toLowerCase())) {
-        parsed.unshift(MASTER_ADMIN_USER);
-        updated = true;
-      }
-      if (!parsed.some((u) => u.email.toLowerCase() === SECONDARY_ADMIN_USER.email.toLowerCase())) {
-        parsed.push(SECONDARY_ADMIN_USER);
-        updated = true;
-      }
-      if (updated) {
-        localStorage.setItem(USERS_DB_KEY, JSON.stringify(parsed));
-      }
-      return parsed;
-    }
-    return [MASTER_ADMIN_USER, SECONDARY_ADMIN_USER];
-  } catch {
-    return [MASTER_ADMIN_USER, SECONDARY_ADMIN_USER];
-  }
-}
-
-function saveStoredUsers(users: StoredUserAccount[]) {
-  try {
-    localStorage.setItem(USERS_DB_KEY, JSON.stringify(users));
-  } catch (e) {
-    console.error('Error saving stored users:', e);
-  }
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  sendPasswordResetForCurrentUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<CRMUser | null>(() => {
-    try {
-      const saved = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch {}
-    return null;
-  });
+  const [user, setUser] = useState<CRMUser | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Listen to Firebase Auth state if active
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
+    // Listen directly to live Firebase Auth state
+    const unsubscribe = onAuthStateChanged(auth, (currentFbUser) => {
+      setFirebaseUser(currentFbUser);
+      if (currentFbUser) {
         const crmUser: CRMUser = {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || 'usuario@moradacredito.com.br',
-          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Usuário CRM',
+          uid: currentFbUser.uid,
+          email: currentFbUser.email || '',
+          displayName:
+            currentFbUser.displayName ||
+            currentFbUser.email?.split('@')[0] ||
+            'Administrador Morada',
+          role: 'ADMIN',
+          photoURL: currentFbUser.photoURL || undefined,
+          providerId: currentFbUser.providerData?.[0]?.providerId || 'password',
         };
         setUser(crmUser);
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
+      } else {
+        setUser(null);
       }
       setLoading(false);
     });
 
-    // Check existing local session
-    try {
-      const saved = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (saved) {
-        setUser(JSON.parse(saved));
-      }
-    } catch {}
-
-    setLoading(false);
     return () => unsubscribe();
   }, []);
 
+  /**
+   * Login using Firebase Authentication email and password
+   */
   const login = async (email: string, pass: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    
-    // Try Firebase Authentication first
-    try {
-      const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-      if (cred.user) {
-        const crmUser: CRMUser = {
-          uid: cred.user.uid,
-          email: cred.user.email || cleanEmail,
-          displayName: cred.user.displayName || 'Deiglison Lima',
-          role: 'ADMIN',
-        };
-        setUser(crmUser);
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
-        return;
-      }
-    } catch (fbError: any) {
-      console.warn('Firebase login attempt fallback to local auth:', fbError.code || fbError.message);
-      
-      // Check stored master administrator accounts
-      const users = getStoredUsers();
-      const match = users.find((u) => u.email.toLowerCase() === cleanEmail);
-
-      if (match) {
-        // Accept stored password hash or fallback admin authentication
-        if (match.passwordHash === pass || pass.length >= 4) {
-          const crmUser: CRMUser = {
-            uid: match.uid,
-            email: match.email,
-            displayName: match.displayName || 'Deiglison Lima',
-            role: 'ADMIN',
-          };
-          setUser(crmUser);
-          localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
-          return;
-        } else {
-          throw new Error('Senha incorreta para o e-mail do administrador.');
-        }
-      }
-
-      // If user is neither in local admin accounts nor in Firebase
-      throw new Error('Acesso restrito. Este sistema é de uso exclusivo do Administrador (Deiglison Lima).');
+    if (!cleanEmail || !pass) {
+      throw new Error('Informe o e-mail e a senha para acessar.');
+    }
+    const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+    if (cred.user) {
+      setFirebaseUser(cred.user);
+      setUser({
+        uid: cred.user.uid,
+        email: cred.user.email || cleanEmail,
+        displayName:
+          cred.user.displayName ||
+          cred.user.email?.split('@')[0] ||
+          'Administrador Morada',
+        role: 'ADMIN',
+        photoURL: cred.user.photoURL || undefined,
+        providerId: cred.user.providerData?.[0]?.providerId || 'password',
+      });
     }
   };
 
+  /**
+   * Login using Firebase Google Authentication
+   */
+  const loginWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const cred = await signInWithPopup(auth, provider);
+    if (cred.user) {
+      setFirebaseUser(cred.user);
+      setUser({
+        uid: cred.user.uid,
+        email: cred.user.email || '',
+        displayName: cred.user.displayName || 'Administrador Morada',
+        role: 'ADMIN',
+        photoURL: cred.user.photoURL || undefined,
+        providerId: 'google.com',
+      });
+    }
+  };
+
+  /**
+   * Create account using Firebase Authentication
+   */
   const register = async (email: string, pass: string, name: string) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim() || cleanEmail.split('@')[0];
 
-    // Try Firebase registration first
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
-      if (userCredential.user) {
-        if (cleanName) {
-          try {
-            await updateProfile(userCredential.user, { displayName: cleanName });
-          } catch {}
+    if (!cleanEmail || !pass) {
+      throw new Error('Informe o e-mail e uma senha para cadastro.');
+    }
+    if (pass.length < 6) {
+      throw new Error('A senha deve ter no mínimo 6 caracteres.');
+    }
+
+    const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+    if (cred.user) {
+      if (cleanName) {
+        try {
+          await updateProfile(cred.user, { displayName: cleanName });
+        } catch (e) {
+          console.warn('Erro ao atualizar perfil do Firebase Auth:', e);
         }
-        const crmUser: CRMUser = {
-          uid: userCredential.user.uid,
-          email: userCredential.user.email || cleanEmail,
-          displayName: cleanName,
-        };
-        setUser(crmUser);
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
-
-        // Save copy to local registry as backup
-        const users = getStoredUsers().filter((u) => u.email.toLowerCase() !== cleanEmail);
-        users.push({
-          uid: userCredential.user.uid,
-          email: cleanEmail,
-          passwordHash: pass,
-          displayName: cleanName,
-          createdAt: new Date().toISOString(),
-        });
-        saveStoredUsers(users);
-        return;
       }
-    } catch (fbError: any) {
-      console.warn('Firebase register attempt fallback to local auth:', fbError.code || fbError.message);
-
-      // Handle local registration
-      const users = getStoredUsers();
-      const existing = users.find((u) => u.email.toLowerCase() === cleanEmail);
-      if (existing) {
-        throw new Error('Este e-mail já está cadastrado. Faça login ou recupere sua senha.');
-      }
-
-      const newUid = `crm_user_${Date.now()}`;
-      const newUser: StoredUserAccount = {
-        uid: newUid,
-        email: cleanEmail,
-        passwordHash: pass,
+      setFirebaseUser(cred.user);
+      setUser({
+        uid: cred.user.uid,
+        email: cred.user.email || cleanEmail,
         displayName: cleanName,
-        createdAt: new Date().toISOString(),
-      };
-
-      users.push(newUser);
-      saveStoredUsers(users);
-
-      const crmUser: CRMUser = {
-        uid: newUid,
-        email: cleanEmail,
-        displayName: cleanName,
-      };
-      setUser(crmUser);
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
+        role: 'ADMIN',
+        photoURL: cred.user.photoURL || undefined,
+        providerId: 'password',
+      });
     }
   };
 
+  /**
+   * Sign out from Firebase Authentication
+   */
   const logout = async () => {
-    try {
-      await firebaseSignOut(auth);
-    } catch {}
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    await firebaseSignOut(auth);
     setUser(null);
+    setFirebaseUser(null);
   };
 
+  /**
+   * Send password reset email via Firebase Authentication
+   */
   const resetPassword = async (email: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    try {
-      await sendPasswordResetEmail(auth, cleanEmail);
-    } catch (fbError) {
-      // Check if user exists in local database
-      const users = getStoredUsers();
-      const exists = users.some((u) => u.email.toLowerCase() === cleanEmail);
-      if (!exists) {
-        throw new Error('E-mail não encontrado na base de usuários.');
-      }
+    if (!cleanEmail) {
+      throw new Error('Informe o e-mail para envio do link de redefinição.');
     }
+    await sendPasswordResetEmail(auth, cleanEmail);
   };
 
-  const loginAsDemo = async () => {
-    const demoEmail = MASTER_ADMIN_USER.email;
-    const demoPass = MASTER_ADMIN_USER.passwordHash;
-
-    try {
-      await signInWithEmailAndPassword(auth, demoEmail, demoPass);
-    } catch {
-      // Immediate local login as Morada Crédito Master Administrator
-      const crmUser: CRMUser = {
-        uid: MASTER_ADMIN_USER.uid,
-        email: MASTER_ADMIN_USER.email,
-        displayName: MASTER_ADMIN_USER.displayName,
-        role: 'ADMIN',
-      };
-      setUser(crmUser);
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(crmUser));
+  /**
+   * Change current user's password directly in Firebase Authentication
+   */
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    const activeUser = auth.currentUser;
+    if (!activeUser) {
+      throw new Error('Nenhum usuário autenticado no Firebase.');
     }
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('A nova senha deve conter pelo menos 6 caracteres.');
+    }
+
+    // If current password provided and user has email, reauthenticate first
+    if (currentPassword && activeUser.email) {
+      try {
+        const credential = EmailAuthProvider.credential(activeUser.email, currentPassword);
+        await reauthenticateWithCredential(activeUser, credential);
+      } catch (authErr: any) {
+        if (
+          authErr.code === 'auth/wrong-password' ||
+          authErr.code === 'auth/invalid-credential'
+        ) {
+          throw new Error('A senha atual digitada está incorreta.');
+        }
+        throw authErr;
+      }
+    }
+
+    // Update password in Firebase Auth
+    await updatePassword(activeUser, newPassword);
+  };
+
+  /**
+   * Send password reset email for currently logged in user
+   */
+  const sendPasswordResetForCurrentUser = async () => {
+    const activeUser = auth.currentUser;
+    if (!activeUser || !activeUser.email) {
+      throw new Error('Usuário não possui e-mail cadastrado.');
+    }
+    await sendPasswordResetEmail(auth, activeUser.email);
   };
 
   return (
     <AuthContext.Provider
       value={{
         user,
+        firebaseUser,
         loading,
         login,
+        loginWithGoogle,
         register,
         logout,
         resetPassword,
-        loginAsDemo,
+        changePassword,
+        sendPasswordResetForCurrentUser,
       }}
     >
       {children}

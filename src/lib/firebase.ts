@@ -8,6 +8,12 @@ import {
   User,
   updateProfile,
   sendPasswordResetEmail,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  GoogleAuthProvider,
+  signInWithPopup,
+  fetchSignInMethodsForEmail,
 } from 'firebase/auth';
 import {
   initializeFirestore,
@@ -15,6 +21,7 @@ import {
   collection,
   doc,
   setDoc,
+  deleteDoc,
   getDocs,
   writeBatch,
   onSnapshot,
@@ -22,7 +29,11 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { ClientProcess } from '../types';
-import { repairProcessFields } from '../utils/storage';
+import {
+  repairProcessFields,
+  getDeletedProcessIds,
+  markProcessAsDeletedLocally,
+} from '../utils/storage';
 
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -56,16 +67,15 @@ export {
   onAuthStateChanged,
   updateProfile,
   sendPasswordResetEmail,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+  GoogleAuthProvider,
+  signInWithPopup,
+  fetchSignInMethodsForEmail,
 };
 
 export type { User };
-
-/**
- * Validates active connection or readiness to Firestore
- */
-export async function testConnection(): Promise<boolean> {
-  return true;
-}
 
 // Firestore collection name for processes
 const PROCESSES_COLLECTION = 'processes';
@@ -85,24 +95,61 @@ function isQuotaError(error: any): boolean {
 }
 
 /**
+ * Recursively cleans an object by removing any keys whose value is undefined.
+ * Firestore strictly rejects undefined field values with an exception.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeForFirestore(item)) as any;
+  }
+  if (typeof data === 'object' && !(data instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, val] of Object.entries(data as Record<string, any>)) {
+      if (val !== undefined) {
+        cleaned[key] = sanitizeForFirestore(val);
+      }
+    }
+    return cleaned as T;
+  }
+  return data;
+}
+
+/**
+ * Validates active connection and health of Firestore
+ */
+export async function testConnection(): Promise<boolean> {
+  try {
+    const meta = await getFirestoreMetadata();
+    return meta.connected;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Merge cloud processes with local processes without losing locally created/updated records
+ * and without resurrecting recently deleted processes.
  */
 export function mergeProcessesLists(
   localList: ClientProcess[],
   cloudList: ClientProcess[]
 ): ClientProcess[] {
+  const deletedIds = getDeletedProcessIds();
   const map = new Map<string, ClientProcess>();
 
-  // Add all local processes first
+  // Add all local processes first (ignoring marked deleted)
   for (const proc of localList) {
-    if (proc && proc.id) {
+    if (proc && proc.id && !deletedIds.has(proc.id)) {
       map.set(proc.id, repairProcessFields(proc));
     }
   }
 
   // Merge cloud processes: take cloud version if newer or not present locally
   for (const rawCloudProc of cloudList) {
-    if (!rawCloudProc || !rawCloudProc.id) continue;
+    if (!rawCloudProc || !rawCloudProc.id || deletedIds.has(rawCloudProc.id)) continue;
     const cloudProc = repairProcessFields(rawCloudProc);
     const existing = map.get(cloudProc.id);
     if (!existing) {
@@ -111,7 +158,7 @@ export function mergeProcessesLists(
       // Compare timestamps
       const cloudTime = new Date(cloudProc.stageUpdatedAt || cloudProc.createdAt || 0).getTime();
       const localTime = new Date(existing.stageUpdatedAt || existing.createdAt || 0).getTime();
-      if (cloudTime > localTime) {
+      if (cloudTime >= localTime) {
         map.set(cloudProc.id, cloudProc);
       }
     }
@@ -126,25 +173,29 @@ export function mergeProcessesLists(
 export async function syncProcessesToFirestore(
   processes: ClientProcess[]
 ): Promise<{ success: boolean; count: number; error?: string }> {
-  if (isFirestoreQuotaExhausted || !processes || processes.length === 0) {
-    return { success: false, count: 0 };
+  if (isFirestoreQuotaExhausted) {
+    return { success: false, count: 0, error: 'Quota diária do Firestore atingida' };
+  }
+  if (!processes || processes.length === 0) {
+    return { success: true, count: 0 };
   }
   try {
     const chunkSize = 200;
     let syncedCount = 0;
+    const deletedIds = getDeletedProcessIds();
 
     for (let i = 0; i < processes.length; i += chunkSize) {
       const chunk = processes.slice(i, i + chunkSize);
       const batch = writeBatch(db);
 
       for (const rawProc of chunk) {
-        if (!rawProc || !rawProc.id) continue;
-        const process = repairProcessFields(rawProc);
-        const processRef = doc(db, PROCESSES_COLLECTION, process.id);
+        if (!rawProc || !rawProc.id || deletedIds.has(rawProc.id)) continue;
+        const sanitized = sanitizeForFirestore(repairProcessFields(rawProc));
+        const processRef = doc(db, PROCESSES_COLLECTION, sanitized.id);
         batch.set(
           processRef,
           {
-            ...process,
+            ...sanitized,
             syncedAt: new Date().toISOString(),
           },
           { merge: true }
@@ -168,12 +219,12 @@ export async function syncProcessesToFirestore(
 }
 
 /**
- * Save single process to Firestore immediately
+ * Save single process to Firestore immediately with sanitization
  */
-export async function saveProcessToFirestore(process: ClientProcess): Promise<void> {
-  if (isFirestoreQuotaExhausted || !process || !process.id) return;
+export async function saveProcessToFirestore(process: ClientProcess): Promise<boolean> {
+  if (isFirestoreQuotaExhausted || !process || !process.id) return false;
   try {
-    const sanitized = repairProcessFields(process);
+    const sanitized = sanitizeForFirestore(repairProcessFields(process));
     const processRef = doc(db, PROCESSES_COLLECTION, sanitized.id);
     await setDoc(
       processRef,
@@ -183,6 +234,7 @@ export async function saveProcessToFirestore(process: ClientProcess): Promise<vo
       },
       { merge: true }
     );
+    return true;
   } catch (error: any) {
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
@@ -190,30 +242,56 @@ export async function saveProcessToFirestore(process: ClientProcess): Promise<vo
     } else {
       console.warn('Firestore single save notice:', error?.message || error);
     }
+    return false;
   }
 }
 
 /**
- * Delete single process from Firestore
+ * Permanently delete single process from Firestore and mark locally
  */
-export async function deleteProcessFromFirestore(processId: string): Promise<void> {
-  if (isFirestoreQuotaExhausted || !processId) return;
+export async function deleteProcessFromFirestore(processId: string): Promise<boolean> {
+  if (!processId) return false;
+  
+  // Register locally so concurrent listener doesn't resurrect it
+  markProcessAsDeletedLocally(processId);
+
+  if (isFirestoreQuotaExhausted) return false;
   try {
     const processRef = doc(db, PROCESSES_COLLECTION, processId);
-    await setDoc(
-      processRef,
-      {
-        isDeleted: true,
-        deletedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    await deleteDoc(processRef);
+    return true;
   } catch (error: any) {
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
     } else {
       console.warn('Firestore delete notice:', error?.message || error);
     }
+    return false;
+  }
+}
+
+/**
+ * Clear all process documents from Firestore (e.g., when user explicitly wipes dataset)
+ */
+export async function clearAllProcessesInFirestore(): Promise<boolean> {
+  if (isFirestoreQuotaExhausted) return false;
+  try {
+    const q = query(collection(db, PROCESSES_COLLECTION));
+    const snap = await getDocs(q);
+    const chunkSize = 200;
+    const docs = snap.docs;
+    for (let i = 0; i < docs.length; i += chunkSize) {
+      const chunk = docs.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      for (const d of chunk) {
+        batch.delete(d.ref);
+      }
+      await batch.commit();
+    }
+    return true;
+  } catch (error: any) {
+    console.warn('Firestore clear all notice:', error?.message || error);
+    return false;
   }
 }
 
@@ -226,9 +304,11 @@ export async function loadProcessesFromFirestore(): Promise<ClientProcess[]> {
     const q = query(collection(db, PROCESSES_COLLECTION));
     const querySnapshot = await getDocs(q);
     const processes: ClientProcess[] = [];
+    const deletedIds = getDeletedProcessIds();
+
     querySnapshot.forEach((doc) => {
       const data = doc.data() as any;
-      if (!data.isDeleted) {
+      if (!data.isDeleted && !deletedIds.has(doc.id)) {
         processes.push(repairProcessFields(data as ClientProcess));
       }
     });
@@ -245,35 +325,40 @@ export async function loadProcessesFromFirestore(): Promise<ClientProcess[]> {
 /**
  * Real-time listener for processes in Firestore with safe callback
  */
-export function subscribeToProcesses(onUpdate: (processes: ClientProcess[]) => void) {
+export function subscribeToProcesses(
+  onUpdate: (processes: ClientProcess[]) => void,
+  onError?: (err: any) => void
+) {
   if (isFirestoreQuotaExhausted) return () => {};
   try {
     const q = query(collection(db, PROCESSES_COLLECTION));
+    const deletedIds = getDeletedProcessIds();
+
     return onSnapshot(
       q,
       (querySnapshot) => {
         const processes: ClientProcess[] = [];
         querySnapshot.forEach((doc) => {
           const data = doc.data() as any;
-          if (!data.isDeleted) {
+          if (!data.isDeleted && !deletedIds.has(doc.id)) {
             processes.push(repairProcessFields(data as ClientProcess));
           }
         });
-        if (processes.length > 0) {
-          onUpdate(processes);
-        }
+        onUpdate(processes);
       },
       (error: any) => {
         if (isQuotaError(error)) {
           isFirestoreQuotaExhausted = true;
         }
         console.warn('Firestore snapshot listener status:', error?.message || error);
+        onError?.(error);
       }
     );
   } catch (err: any) {
     if (isQuotaError(err)) {
       isFirestoreQuotaExhausted = true;
     }
+    onError?.(err);
     return () => {};
   }
 }
@@ -286,12 +371,14 @@ export async function getFirestoreMetadata(): Promise<{
   databaseId: string;
   projectId: string;
   totalDocuments: number;
+  error?: string;
 }> {
   const meta = {
     connected: false,
     databaseId: firebaseConfig.firestoreDatabaseId || '(default)',
     projectId: firebaseConfig.projectId || '',
     totalDocuments: 0,
+    error: undefined as string | undefined,
   };
 
   try {
@@ -299,9 +386,11 @@ export async function getFirestoreMetadata(): Promise<{
     const snap = await getDocs(q);
     meta.connected = true;
     meta.totalDocuments = snap.docs.filter((d) => !d.data()?.isDeleted).length;
-  } catch (e) {
-    meta.connected = !isFirestoreQuotaExhausted;
+  } catch (e: any) {
+    meta.connected = false;
+    meta.error = e?.message || String(e);
   }
 
   return meta;
 }
+

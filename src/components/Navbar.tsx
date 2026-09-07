@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   TrendingUp,
   DollarSign,
@@ -19,11 +19,13 @@ import {
   Database,
   User,
   LogOut,
+  KeyRound,
 } from 'lucide-react';
 import { MoradaLogo } from './MoradaLogo';
 import { ClientProcess } from '../types';
 import { formatCurrency, formatMonthYear } from '../utils/formatters';
 import { useAuth } from '../context/AuthContext';
+import { ChangePasswordModal } from './ChangePasswordModal';
 
 interface NavbarProps {
   activeTab: 'pipeline' | 'table' | 'financial' | 'simulator' | 'whatsapp';
@@ -57,6 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   processes,
 }) => {
   const { user, logout } = useAuth();
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Quick calculations for header
   const activeProcesses = processes.filter(
@@ -170,6 +173,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
 
                 <button
+                  id="btn-open-change-password"
+                  onClick={() => setIsChangePasswordOpen(true)}
+                  title="Alterar Senha do Firebase Auth"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <KeyRound className="w-4 h-4" />
+                </button>
+
+                <button
                   id="btn-logout"
                   onClick={() => logout()}
                   title="Sair do CRM"
@@ -274,6 +286,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+      />
     </header>
   );
 };

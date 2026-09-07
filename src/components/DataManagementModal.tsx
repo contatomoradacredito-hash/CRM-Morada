@@ -35,6 +35,7 @@ import { formatCurrency, parseMonthYearString } from '../utils/formatters';
 import {
   syncProcessesToFirestore,
   loadProcessesFromFirestore,
+  clearAllProcessesInFirestore,
   getFirestoreMetadata,
   firebaseConfig,
 } from '../lib/firebase';
@@ -111,10 +112,11 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
     }
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     clearAllProcesses();
     onUpdateProcesses([]);
-    showToast('Base de dados zerada com sucesso! Pronto para novos lançamentos.');
+    clearAllProcessesInFirestore().catch(() => {});
+    showToast('Base de dados zerada com sucesso na máquina e na nuvem!');
     setConfirmClear(false);
     onClose();
   };
@@ -122,7 +124,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   const handleRestoreSampleData = () => {
     const defaultData = reloadDefaultProcesses();
     onUpdateProcesses(defaultData);
-    showToast('Base modelo com histórico anual recarregada com sucesso!');
+    syncProcessesToFirestore(defaultData).catch(() => {});
+    showToast('Base modelo com histórico anual recarregada e sincronizada!');
     onClose();
   };
 

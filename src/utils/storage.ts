@@ -3,8 +3,41 @@ import { INITIAL_PROCESSES } from '../data/defaultData';
 import { getFullDefaultChecklist } from './constants';
 import { formatCurrency, parseMonthYearString } from './formatters';
 
-const STORAGE_KEY = 'morada_credito_processes_v1';
-const HAS_INITIALIZED_KEY = 'morada_credito_initialized_v1';
+const STORAGE_KEY = 'morada_credito_processes_v2';
+const HAS_INITIALIZED_KEY = 'morada_credito_initialized_v2';
+const DELETED_IDS_KEY = 'morada_credito_deleted_ids_v2';
+
+export function getDeletedProcessIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_IDS_KEY);
+    if (!raw) return new Set<string>();
+    const parsed = JSON.parse(raw);
+    return new Set<string>(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+export function markProcessAsDeletedLocally(id: string): void {
+  try {
+    const set = getDeletedProcessIds();
+    set.add(id);
+    // Keep max 1000 deleted IDs to prevent unbounded growth
+    const arr = Array.from(set);
+    if (arr.length > 1000) {
+      arr.splice(0, arr.length - 1000);
+    }
+    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(arr));
+  } catch (e) {
+    console.error('Erro ao registrar ID deletado:', e);
+  }
+}
+
+export function clearDeletedProcessIds(): void {
+  try {
+    localStorage.removeItem(DELETED_IDS_KEY);
+  } catch {}
+}
 
 /**
  * Repairs a single process if it has inverted/shifted columns from a previous CSV import.
@@ -93,14 +126,14 @@ export function loadProcesses(): ClientProcess[] {
     const initialized = localStorage.getItem(HAS_INITIALIZED_KEY);
     const saved = localStorage.getItem(STORAGE_KEY);
 
-    // If first time opening the applet, initialize with default data
+    // Initial state is a clean empty base so user can test and create new processes
     if (!initialized) {
       localStorage.setItem(HAS_INITIALIZED_KEY, 'true');
-      saveProcesses(INITIAL_PROCESSES);
-      return INITIAL_PROCESSES;
+      saveProcesses([]);
+      return [];
     }
 
-    // If already initialized and saved exists (even if empty array []), respect it!
+    // If saved exists (including empty array []), respect it!
     if (saved !== null) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
@@ -123,7 +156,7 @@ export function loadProcesses(): ClientProcess[] {
     return [];
   } catch (error) {
     console.error('Erro ao carregar dados do armazenamento:', error);
-    return INITIAL_PROCESSES;
+    return [];
   }
 }
 
@@ -147,6 +180,7 @@ export function clearAllProcesses(): void {
 
 export function reloadDefaultProcesses(): ClientProcess[] {
   try {
+    clearDeletedProcessIds();
     saveProcesses(INITIAL_PROCESSES);
     return INITIAL_PROCESSES;
   } catch (error) {

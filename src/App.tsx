@@ -6,13 +6,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import { ClientProcess, CreditAnalysisStatus, CreditType, ProcessStage } from './types';
-import { INITIAL_PROCESSES } from './data/defaultData';
 import {
   exportProcessesToCSV,
   exportProcessesToJSON,
   getAvailableMonths,
   loadProcesses,
   saveProcesses,
+  reloadDefaultProcesses,
 } from './utils/storage';
 import { Navbar } from './components/Navbar';
 import { HeaderStats } from './components/HeaderStats';
@@ -85,17 +85,12 @@ function CRMApp() {
             return merged;
           });
         } else {
-          // Cloud database is clean/empty: upload 12-month history to Firestore
+          // Cloud database is empty or freshly zeroed: keep it clean and do not auto-inject sample data
           const currentProcesses = loadProcesses();
-          const datasetToUpload =
-            currentProcesses && currentProcesses.length > 0
-              ? currentProcesses
-              : INITIAL_PROCESSES;
-
-          if (datasetToUpload && datasetToUpload.length > 0) {
-            const res = await syncProcessesToFirestore(datasetToUpload);
+          if (currentProcesses && currentProcesses.length > 0) {
+            const res = await syncProcessesToFirestore(currentProcesses);
             if (res.success && isMounted) {
-              console.log(`Base de dados Firebase Firestore inicializada com ${res.count} registros dos 12 meses.`);
+              console.log(`Sincronizados ${res.count} processos com o Firestore.`);
             }
           }
         }
@@ -255,9 +250,9 @@ function CRMApp() {
   };
 
   const handleResetData = () => {
-    setProcesses(INITIAL_PROCESSES);
-    saveProcesses(INITIAL_PROCESSES);
-    syncProcessesToFirestore(INITIAL_PROCESSES).catch(() => {});
+    const defaultData = reloadDefaultProcesses();
+    setProcesses(defaultData);
+    syncProcessesToFirestore(defaultData).catch(() => {});
     showToast('Dados de exemplo da Morada Crédito recarregados.');
   };
 
