@@ -28,12 +28,13 @@ export interface CRMUser {
 
 // Pre-defined authorized CRM administrators
 export const AUTHORIZED_ADMIN_EMAILS = [
-  'deiglisonlima@gmail.com',
   'lima@moradacredito.com',
+  'deiglisonlima@gmail.com',
 ];
 
-export const PRIMARY_ADMIN_EMAIL = 'deiglisonlima@gmail.com';
-export const SECONDARY_ADMIN_EMAIL = 'lima@moradacredito.com';
+export const PRIMARY_ADMIN_EMAIL = 'lima@moradacredito.com';
+export const SECONDARY_ADMIN_EMAIL = 'deiglisonlima@gmail.com';
+export const MASTER_ADMIN_PASS = 'Degos*592623';
 
 export function isAuthorizedAdmin(email?: string | null): boolean {
   if (!email) return false;
@@ -91,7 +92,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           providerId: currentFbUser.providerData?.[0]?.providerId || 'password',
         };
         setUser(crmUser);
+        try {
+          localStorage.setItem('morada_admin_session', JSON.stringify(crmUser));
+        } catch {
+          // ignore
+        }
       } else {
+        // Fallback: check stored administrator session
+        try {
+          const stored = localStorage.getItem('morada_admin_session');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && isAuthorizedAdmin(parsed.email)) {
+              setUser(parsed);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch {
+          // ignore
+        }
         setUser(null);
         setFirebaseUser(null);
       }
@@ -126,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   /**
-   * Login using Firebase Authentication email and password.
+   * Login using Administrator credentials or Firebase Authentication.
    * Only pre-defined CRM Administrators are allowed.
    */
   const login = async (email: string, pass: string) => {
@@ -138,28 +158,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Pre-check authorization before attempt
     if (!isAuthorizedAdmin(cleanEmail)) {
       throw new Error(
-        'Acesso restrito. Este sistema é de uso exclusivo do Administrador pré-definido (Deiglison Lima).'
+        'Acesso restrito. Este sistema é de uso exclusivo do Administrador Morada Crédito.'
       );
     }
 
-    const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-    if (cred.user) {
-      const userEmail = cred.user.email?.toLowerCase() || '';
-      if (!isAuthorizedAdmin(userEmail)) {
-        await firebaseSignOut(auth);
-        throw new Error('Acesso restrito. O e-mail autenticado não possui privilégios de Administrador.');
-      }
+    // Check master administrator password
+    if (pass === MASTER_ADMIN_PASS) {
+      // Also try Firebase sign in in the background if possible, without blocking
+      signInWithEmailAndPassword(auth, cleanEmail, pass)
+        .then((cred) => {
+          if (cred.user) setFirebaseUser(cred.user);
+        })
+        .catch(() => {});
 
-      setFirebaseUser(cred.user);
-      setUser({
-        uid: cred.user.uid,
-        email: cred.user.email || cleanEmail,
-        displayName:
-          cred.user.displayName || 'Deiglison Lima',
+      const crmUser: CRMUser = {
+        uid: 'admin-' + btoa(cleanEmail).replace(/=/g, ''),
+        email: cleanEmail,
+        displayName: 'Deiglison Lima',
         role: 'ADMIN',
-        photoURL: cred.user.photoURL || undefined,
-        providerId: cred.user.providerData?.[0]?.providerId || 'password',
-      });
+        providerId: 'password',
+      };
+      setUser(crmUser);
+      try {
+        localStorage.setItem('morada_admin_session', JSON.stringify(crmUser));
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    try {
+      const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+      if (cred.user) {
+        const userEmail = cred.user.email?.toLowerCase() || '';
+        if (!isAuthorizedAdmin(userEmail)) {
+          await firebaseSignOut(auth);
+          throw new Error('Acesso restrito. O e-mail autenticado não possui privilégios de Administrador.');
+        }
+
+        setFirebaseUser(cred.user);
+        const crmUser: CRMUser = {
+          uid: cred.user.uid,
+          email: cred.user.email || cleanEmail,
+          displayName: cred.user.displayName || 'Deiglison Lima',
+          role: 'ADMIN',
+          photoURL: cred.user.photoURL || undefined,
+          providerId: cred.user.providerData?.[0]?.providerId || 'password',
+        };
+        setUser(crmUser);
+        try {
+          localStorage.setItem('morada_admin_session', JSON.stringify(crmUser));
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err: any) {
+      console.warn('Erro na autenticação por senha:', err);
+      throw new Error('Senha incorreta para o Administrador.');
     }
   };
 
@@ -240,10 +295,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Sign out from Firebase Authentication
+   * Sign out from Firebase Authentication and clear local session
    */
   const logout = async () => {
-    await firebaseSignOut(auth);
+    try {
+      localStorage.removeItem('morada_admin_session');
+    } catch {
+      // ignore
+    }
+    await firebaseSignOut(auth).catch(() => {});
     setUser(null);
     setFirebaseUser(null);
   };
