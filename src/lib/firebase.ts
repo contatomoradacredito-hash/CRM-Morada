@@ -13,6 +13,8 @@ import {
   EmailAuthProvider,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   fetchSignInMethodsForEmail,
 } from 'firebase/auth';
 import {
@@ -72,6 +74,8 @@ export {
   EmailAuthProvider,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   fetchSignInMethodsForEmail,
 };
 

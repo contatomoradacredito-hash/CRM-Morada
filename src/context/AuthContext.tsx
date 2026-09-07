@@ -11,6 +11,8 @@ import {
   EmailAuthProvider,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   sendPasswordResetEmail,
   User,
 } from '../lib/firebase';
@@ -46,6 +48,7 @@ interface AuthContextType {
   authorizedEmails: string[];
   login: (email: string, pass: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  loginWithGoogleRedirect: () => Promise<void>;
   register: (email: string, pass: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -94,6 +97,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setLoading(false);
     });
+
+    // Check if user is returning from a Google signInWithRedirect
+    getRedirectResult(auth)
+      .then((cred) => {
+        if (cred && cred.user) {
+          const userEmail = cred.user.email?.toLowerCase() || '';
+          if (!isAuthorizedAdmin(userEmail)) {
+            firebaseSignOut(auth);
+            return;
+          }
+          setFirebaseUser(cred.user);
+          setUser({
+            uid: cred.user.uid,
+            email: cred.user.email || userEmail,
+            displayName: cred.user.displayName || 'Deiglison Lima',
+            role: 'ADMIN',
+            photoURL: cred.user.photoURL || undefined,
+            providerId: 'google.com',
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('Erro ao processar retorno do Google Redirect:', err);
+      });
 
     return () => unsubscribe();
   }, []);
@@ -163,6 +190,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         providerId: 'google.com',
       });
     }
+  };
+
+  /**
+   * Login using Firebase Google Authentication via full page redirect.
+   * Useful when popups are blocked by the browser or when running inside an iframe.
+   */
+  const loginWithGoogleRedirect = async () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await signInWithRedirect(auth, provider);
   };
 
   /**
@@ -277,6 +314,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         authorizedEmails: AUTHORIZED_ADMIN_EMAILS,
         login,
         loginWithGoogle,
+        loginWithGoogleRedirect,
         register,
         logout,
         resetPassword,
