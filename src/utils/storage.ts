@@ -263,7 +263,7 @@ export function downloadHistorySpreadsheetTemplate(): void {
     'CPF',
     'Telefone',
     'Email',
-    'Tipo de Credito (AQUISICAO_RESIDENCIAL / AQUISICAO_COMERCIAL / HOME_EQUITY / CONSTRUCAO_REFORMA / PORTABILIDADE)',
+    'Tipo de Credito (AQUISICAO_RESIDENCIAL / AQUISICAO_COMERCIAL / HOME_EQUITY / CONSTRUCAO / PORTABILIDADE)',
     'Valor do Imovel (R$)',
     'Valor Financiado (R$)',
     'Valor da Entrada (R$)',
@@ -275,7 +275,7 @@ export function downloadHistorySpreadsheetTemplate(): void {
     'Percentual Comissao (%)',
     'Valor da Comissao (R$ - opcional)',
     'Status Comissao (PAGA / DISPONIVEL_FATURAMENTO / PREVISTA)',
-    'Fase do Processo (COMMISSION_PAID / DISBURSEMENT_COMPLETED / PROPERTY_REGISTRY / CONTRACT_SIGNATURE / CONTRACT_ISSUANCE / LEGAL_ANALYSIS / PROPERTY_APPRAISAL / CREDIT_ANALYSIS / SIMULATION_COLLECTION)',
+    'Fase do Processo (COMMISSION_PAID / DISBURSEMENT_COMPLETED / PROPERTY_REGISTRY / CONTRACT_SIGNATURE / CONTRACT_ISSUANCE / VALUE_CONFIRMATION / LEGAL_COMPLIANCE / PROPERTY_VALUATION / CREDIT_ANALYSIS / SIMULATION_COLLECTION)',
     'Mes e Ano de Fechamento (AAAA-MM, ex: 2025-09, 2026-01, 2026-08)',
     'Nome do Corretor Parceiro',
     'Cidade do Imovel',
@@ -852,14 +852,16 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
       const clientEmail = getCell(map.clientEmail, '');
 
       const rawCreditType = getCell(map.creditType, 'AQUISICAO_RESIDENCIAL').toUpperCase();
+      // Normaliza alias legado (CONSTRUCAO_REFORMA) para o valor atual do enum (CONSTRUCAO)
+      const normalizedCreditType = rawCreditType.includes('CONSTRUCAO') ? 'CONSTRUCAO' : rawCreditType;
       const creditType: any = [
         'AQUISICAO_RESIDENCIAL',
         'AQUISICAO_COMERCIAL',
         'HOME_EQUITY',
-        'CONSTRUCAO_REFORMA',
+        'CONSTRUCAO',
         'PORTABILIDADE',
-      ].includes(rawCreditType)
-        ? rawCreditType
+      ].includes(normalizedCreditType)
+        ? normalizedCreditType
         : 'AQUISICAO_RESIDENCIAL';
 
       const propertyValue = parseNumber(getCell(map.propertyValue), 0);
@@ -891,19 +893,26 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
         : 'PAGA';
 
       const rawStage = getCell(map.stage, 'COMMISSION_PAID').toUpperCase();
+      // Normaliza aliases legados para os valores atuais do enum ProcessStage
+      const STAGE_ALIASES: Record<string, ProcessStage> = {
+        PROPERTY_APPRAISAL: 'PROPERTY_VALUATION',
+        LEGAL_ANALYSIS: 'LEGAL_COMPLIANCE',
+      };
+      const normalizedStage = STAGE_ALIASES[rawStage] || rawStage;
       const stage: any = [
         'SIMULATION_COLLECTION',
         'CREDIT_ANALYSIS',
-        'PROPERTY_APPRAISAL',
-        'LEGAL_ANALYSIS',
+        'PROPERTY_VALUATION',
+        'LEGAL_COMPLIANCE',
+        'VALUE_CONFIRMATION',
         'CONTRACT_ISSUANCE',
         'CONTRACT_SIGNATURE',
         'PROPERTY_REGISTRY',
         'DISBURSEMENT_COMPLETED',
         'COMMISSION_PAID',
         'DECLINED_CANCELLED',
-      ].includes(rawStage)
-        ? rawStage
+      ].includes(normalizedStage)
+        ? normalizedStage
         : 'COMMISSION_PAID';
 
       // =========================================================================

@@ -138,6 +138,7 @@ export interface ClientProcess {
   generalObservations?: string;
   valuationNotes?: string;
   legalNotes?: string;
+  declineReason?: string; // Motivo do declínio/cancelamento (exibido nos cards DECLINED_CANCELLED)
 }
 
 export interface BankCommissionRule {

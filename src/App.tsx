@@ -178,7 +178,7 @@ function CRMApp() {
           const procUpdated: ClientProcess = {
             ...p,
             creditAnalysisStatus: status,
-            creditApprovedAt: status === 'APROVADO' ? (p.creditApprovedAt || new Date().toISOString()) : p.creditApprovedAt,
+            creditApprovalDate: status === 'APROVADO' ? (p.creditApprovalDate || new Date().toISOString()) : p.creditApprovalDate,
             stageUpdatedAt: new Date().toISOString(),
             stageHistory: [historyEntry, ...(p.stageHistory || [])],
           };
