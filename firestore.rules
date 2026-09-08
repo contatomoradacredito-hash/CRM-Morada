@@ -1,14 +1,15 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /processes/{processId} {
-      allow read, write: if true;
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email in [
+          'lima@moradacredito.com',
+          'deiglisonlima@gmail.com'
+        ];
     }
-    match /users/{userId} {
-      allow read, write: if true;
-    }
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    match /processes/{id} { allow read, write: if isAdmin(); }
+    match /users/{id}     { allow read, write: if isAdmin(); }
+    match /{document=**}  { allow read, write: if false; }
   }
 }
