@@ -852,7 +852,6 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
       const clientEmail = getCell(map.clientEmail, '');
 
       const rawCreditType = getCell(map.creditType, 'AQUISICAO_RESIDENCIAL').toUpperCase();
-      // Normaliza alias legado (CONSTRUCAO_REFORMA) para o valor atual do enum (CONSTRUCAO)
       const normalizedCreditType = rawCreditType.includes('CONSTRUCAO') ? 'CONSTRUCAO' : rawCreditType;
       const creditType: any = [
         'AQUISICAO_RESIDENCIAL',
@@ -893,7 +892,6 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
         : 'PAGA';
 
       const rawStage = getCell(map.stage, 'COMMISSION_PAID').toUpperCase();
-      // Normaliza aliases legados para os valores atuais do enum ProcessStage
       const STAGE_ALIASES: Record<string, ProcessStage> = {
         PROPERTY_APPRAISAL: 'PROPERTY_VALUATION',
         LEGAL_ANALYSIS: 'LEGAL_COMPLIANCE',
