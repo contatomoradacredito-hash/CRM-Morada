@@ -102,6 +102,39 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   }
 }
 
+export async function getTenant(tenantId: string): Promise<{ name: string } | null> {
+  if (!tenantId) return null;
+  try {
+    const snap = await getDoc(doc(db, 'tenants', tenantId));
+    if (!snap.exists()) return null;
+    const data = snap.data() as any;
+    return { name: data.name || tenantId };
+  } catch {
+    return null;
+  }
+}
+
+export async function getTenantMembers(tenantId: string): Promise<UserProfile[]> {
+  if (!tenantId) return [];
+  try {
+    const q = query(collection(db, 'users'), where('tenantId', '==', tenantId));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => {
+      const data = d.data() as any;
+      return {
+        uid: d.id,
+        tenantId: data.tenantId,
+        role: data.role,
+        email: data.email || '',
+        displayName: data.displayName || '',
+      };
+    });
+  } catch (error: any) {
+    console.warn('Erro ao carregar membros da empresa:', error?.message || error);
+    return [];
+  }
+}
+
 const TENANTS_COLLECTION = 'tenants';
 const PROCESSES_SUBCOLLECTION = 'processes';
 

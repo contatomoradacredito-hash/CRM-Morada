@@ -17,7 +17,7 @@ import {
   BarChart3,
   Calendar,
   Database,
-  User,
+  Users,
   LogOut,
   KeyRound,
 } from 'lucide-react';
@@ -26,6 +26,7 @@ import { ClientProcess } from '../types';
 import { formatCurrency, formatMonthYear } from '../utils/formatters';
 import { useAuth } from '../context/AuthContext';
 import { ChangePasswordModal } from './ChangePasswordModal';
+import { MembersModal } from './MembersModal';
 
 interface NavbarProps {
   activeTab: 'pipeline' | 'table' | 'financial' | 'simulator' | 'whatsapp';
@@ -60,6 +61,11 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isMembersOpen, setIsMembersOpen] = useState(false);
+
+  const isAdmin = user?.role === 'OWNER' || user?.role === 'ADMIN';
+  const roleLabel =
+    user?.role === 'OWNER' ? 'Proprietário' : user?.role === 'ADMIN' ? 'Administrador' : 'Analista';
 
   // Quick calculations for header
   const activeProcesses = processes.filter(
@@ -167,10 +173,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {user.displayName || 'Deiglison Lima'}
                     </p>
                     <p className="text-[10px] font-extrabold text-amber-400 leading-tight flex items-center gap-1">
-                      <span>👑 Administrador</span>
+                      <span>{roleLabel}</span>
                     </p>
                   </div>
                 </div>
+
+                {isAdmin && (
+                  <button
+                    id="btn-open-members"
+                    onClick={() => setIsMembersOpen(true)}
+                    title="Membros da empresa"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    <Users className="w-4 h-4" />
+                  </button>
+                )}
 
                 <button
                   id="btn-open-change-password"
@@ -287,11 +304,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Change Password Modal */}
       <ChangePasswordModal
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}
       />
+
+      <MembersModal isOpen={isMembersOpen} onClose={() => setIsMembersOpen(false)} />
     </header>
   );
 };
