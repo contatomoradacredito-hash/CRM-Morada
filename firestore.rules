@@ -1,15 +1,32 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAdmin() {
-      return request.auth != null
-        && request.auth.token.email in [
-          'lima@moradacredito.com',
-          'deiglisonlima@gmail.com'
-        ];
+    function signedIn() { return request.auth != null; }
+    function me()       { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function myTenant() { return me().tenantId; }
+    function myRole()   { return me().role; }
+    function isMember(tid) { return signedIn() && myTenant() == tid; }
+    function isAdmin(tid)  { return isMember(tid) && (myRole() == 'OWNER' || myRole() == 'ADMIN'); }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (
+        request.auth.uid == uid
+        || (resource.data.tenantId == myTenant() && isAdmin(resource.data.tenantId))
+      );
+      allow write: if false;
     }
-    match /processes/{id} { allow read, write: if isAdmin(); }
-    match /users/{id}     { allow read, write: if isAdmin(); }
-    match /{document=**}  { allow read, write: if false; }
+
+    match /tenants/{tid} {
+      allow read: if isMember(tid);
+      allow write: if false;
+
+      match /processes/{pid} {
+        allow read:            if isAdmin(tid) || (isMember(tid) && resource.data.ownerUid == request.auth.uid);
+        allow create:          if isAdmin(tid) || (isMember(tid) && request.resource.data.ownerUid == request.auth.uid);
+        allow update, delete:  if isAdmin(tid) || (isMember(tid) && resource.data.ownerUid == request.auth.uid);
+      }
+    }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }

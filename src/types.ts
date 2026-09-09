@@ -138,6 +138,8 @@ export interface ClientProcess {
   generalObservations?: string;
   valuationNotes?: string;
   legalNotes?: string;
+  declineReason?: string;
+  ownerUid?: string;
 }
 
 export interface BankCommissionRule {
@@ -161,4 +163,14 @@ export interface SimulationParameters {
   bank: BankPartner;
   clientName?: string;
   clientPhone?: string;
+}
+
+export type TenantRole = 'OWNER' | 'ADMIN' | 'ANALYST';
+
+export interface UserProfile {
+  uid: string;
+  tenantId: string;
+  role: TenantRole;
+  email: string;
+  displayName: string;
 }

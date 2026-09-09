@@ -13,6 +13,7 @@ import {
   loadProcesses,
   saveProcesses,
   reloadDefaultProcesses,
+  clearAllProcesses,
 } from './utils/storage';
 import { Navbar } from './components/Navbar';
 import { HeaderStats } from './components/HeaderStats';
@@ -33,14 +34,14 @@ import {
   deleteProcessFromFirestore,
   loadProcessesFromFirestore,
   subscribeToProcesses,
-  mergeProcessesLists,
-  testConnection,
+  getTenant,
 } from './lib/firebase';
 import { Building2 } from 'lucide-react';
 
 function CRMApp() {
-  const { user, loading } = useAuth();
+  const { user, loading, pendingAccess, logout } = useAuth();
   const [processes, setProcesses] = useState<ClientProcess[]>(() => loadProcesses());
+  const [isDemoTenant, setIsDemoTenant] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'pipeline' | 'table' | 'financial' | 'simulator' | 'whatsapp'>('pipeline');
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
   const [selectedBankFilter, setSelectedBankFilter] = useState<string>('ALL');
@@ -63,36 +64,36 @@ function CRMApp() {
     }, 3500);
   }, []);
 
-  // Sync with Firestore & localStorage with non-destructive merge and automatic initial upload
   useEffect(() => {
-    if (!user) return;
+    if (!user?.tenantId) {
+      clearAllProcesses();
+      setProcesses([]);
+      return;
+    }
+    const tenantId = user.tenantId;
+    const viewer = { uid: user.uid, role: user.role ?? 'ANALYST' };
 
     let isMounted = true;
 
     async function initializeCloudSync() {
       try {
-        const cloudProcesses = await loadProcessesFromFirestore();
+        const [cloudProcesses, tenant] = await Promise.all([
+          loadProcessesFromFirestore(tenantId, viewer),
+          getTenant(tenantId),
+        ]);
+        if (!isMounted) return;
+        if (tenant) setIsDemoTenant(tenant.demoMode);
 
-        if (cloudProcesses && cloudProcesses.length > 0) {
-          if (!isMounted) return;
-          setProcesses((current) => {
-            const merged = mergeProcessesLists(current, cloudProcesses);
-            saveProcesses(merged);
-            // If local dataset had new or un-synced items, update Firestore
-            if (merged.length > cloudProcesses.length) {
-              syncProcessesToFirestore(merged);
-            }
-            return merged;
-          });
+        if (cloudProcesses.length > 0) {
+          saveProcesses(cloudProcesses);
+          setProcesses(cloudProcesses);
+        } else if (tenant?.demoMode) {
+          const demo = reloadDefaultProcesses();
+          setProcesses(demo);
+          await syncProcessesToFirestore(tenantId, demo);
         } else {
-          // Cloud database is empty or freshly zeroed: keep it clean and do not auto-inject sample data
-          const currentProcesses = loadProcesses();
-          if (currentProcesses && currentProcesses.length > 0) {
-            const res = await syncProcessesToFirestore(currentProcesses);
-            if (res.success && isMounted) {
-              console.log(`Sincronizados ${res.count} processos com o Firestore.`);
-            }
-          }
+          clearAllProcesses();
+          setProcesses([]);
         }
       } catch (err) {
         console.warn('Initial cloud sync notice:', err);
@@ -101,14 +102,10 @@ function CRMApp() {
 
     initializeCloudSync();
 
-    // Real-time Firestore synchronization
-    const unsubscribe = subscribeToProcesses((cloudProcesses) => {
+    const unsubscribe = subscribeToProcesses(tenantId, viewer, (cloudProcesses) => {
       if (!isMounted) return;
-      setProcesses((current) => {
-        const merged = mergeProcessesLists(current, cloudProcesses);
-        saveProcesses(merged);
-        return merged;
-      });
+      saveProcesses(cloudProcesses);
+      setProcesses(cloudProcesses);
     });
 
     return () => {
@@ -157,8 +154,8 @@ function CRMApp() {
       return updated;
     });
 
-    if (updatedProcess) {
-      saveProcessToFirestore(updatedProcess);
+    if (updatedProcess && user?.tenantId) {
+      saveProcessToFirestore(user.tenantId, updatedProcess);
     }
     showToast(`Processo atualizado para ${STAGE_CONFIGS[nextStage]?.shortLabel || nextStage}`);
   };
@@ -178,7 +175,7 @@ function CRMApp() {
           const procUpdated: ClientProcess = {
             ...p,
             creditAnalysisStatus: status,
-            creditApprovedAt: status === 'APROVADO' ? (p.creditApprovedAt || new Date().toISOString()) : p.creditApprovedAt,
+            creditApprovalDate: status === 'APROVADO' ? (p.creditApprovalDate || new Date().toISOString()) : p.creditApprovalDate,
             stageUpdatedAt: new Date().toISOString(),
             stageHistory: [historyEntry, ...(p.stageHistory || [])],
           };
@@ -191,8 +188,8 @@ function CRMApp() {
       return updated;
     });
 
-    if (updatedProcess) {
-      saveProcessToFirestore(updatedProcess);
+    if (updatedProcess && user?.tenantId) {
+      saveProcessToFirestore(user.tenantId, updatedProcess);
     }
     showToast(`Análise de crédito atualizada para: ${CREDIT_ANALYSIS_STATUS_CONFIGS[status]?.label || status}`);
   };
@@ -203,7 +200,7 @@ function CRMApp() {
       saveProcesses(list);
       return list;
     });
-    saveProcessToFirestore(updatedProc);
+    if (user?.tenantId) saveProcessToFirestore(user.tenantId, updatedProc);
     showToast(`Processo de ${updatedProc.clientName} salvo com sucesso!`);
   };
 
@@ -213,18 +210,19 @@ function CRMApp() {
       saveProcesses(list);
       return list;
     });
-    deleteProcessFromFirestore(processId);
+    if (user?.tenantId) deleteProcessFromFirestore(user.tenantId, processId);
     showToast('Processo excluído.');
   };
 
   const handleCreateProcess = (newProc: ClientProcess) => {
+    const withOwner: ClientProcess = { ...newProc, ownerUid: newProc.ownerUid || user?.uid };
     setProcesses((prev) => {
-      const updated = [newProc, ...prev.filter((p) => p.id !== newProc.id)];
+      const updated = [withOwner, ...prev.filter((p) => p.id !== withOwner.id)];
       saveProcesses(updated);
       return updated;
     });
-    saveProcessToFirestore(newProc);
-    showToast(`Novo processo de ${newProc.clientName} adicionado ao funil com sucesso!`);
+    if (user?.tenantId) saveProcessToFirestore(user.tenantId, withOwner);
+    showToast(`Novo processo de ${withOwner.clientName} adicionado ao funil com sucesso!`);
   };
 
   const handleCreateProcessFromSim = (simData: {
@@ -252,7 +250,7 @@ function CRMApp() {
   const handleResetData = () => {
     const defaultData = reloadDefaultProcesses();
     setProcesses(defaultData);
-    syncProcessesToFirestore(defaultData).catch(() => {});
+    if (user?.tenantId) syncProcessesToFirestore(user.tenantId, defaultData).catch(() => {});
     showToast('Dados de exemplo da Morada Crédito recarregados.');
   };
 
@@ -276,7 +274,28 @@ function CRMApp() {
     );
   }
 
-  // If not logged in, show Login / Register screen
+  if (pendingAccess) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4 px-6 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+          <Building2 className="w-7 h-7 text-amber-400" />
+        </div>
+        <div className="space-y-1.5 max-w-sm">
+          <p className="text-sm font-bold text-slate-100">Acesso pendente</p>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Sua conta foi autenticada, mas ainda não está vinculada a nenhuma empresa. Fale com o administrador para liberar seu acesso.
+          </p>
+        </div>
+        <button
+          onClick={logout}
+          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+        >
+          Sair
+        </button>
+      </div>
+    );
+  }
+
   if (!user) {
     return <LoginScreen />;
   }
@@ -309,6 +328,7 @@ function CRMApp() {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         processes={processes}
+        isDemo={isDemoTenant}
       />
 
       {/* Main Content Area - Wide Full Canvas */}
@@ -404,7 +424,7 @@ function CRMApp() {
           onUpdateProcesses={(updated) => {
             setProcesses(updated);
             saveProcesses(updated);
-            syncProcessesToFirestore(updated).catch(() => {});
+            if (user?.tenantId) syncProcessesToFirestore(user.tenantId, updated).catch(() => {});
           }}
           onOpenNewProcessWithMonth={handleOpenNewProcessWithMonth}
           showToast={showToast}
