@@ -13,6 +13,7 @@ import {
   loadProcesses,
   saveProcesses,
   reloadDefaultProcesses,
+  clearAllProcesses,
 } from './utils/storage';
 import { Navbar } from './components/Navbar';
 import { HeaderStats } from './components/HeaderStats';
@@ -33,7 +34,6 @@ import {
   deleteProcessFromFirestore,
   loadProcessesFromFirestore,
   subscribeToProcesses,
-  mergeProcessesLists,
   getTenant,
 } from './lib/firebase';
 import { Building2 } from 'lucide-react';
@@ -65,7 +65,11 @@ function CRMApp() {
   }, []);
 
   useEffect(() => {
-    if (!user?.tenantId) return;
+    if (!user?.tenantId) {
+      clearAllProcesses();
+      setProcesses([]);
+      return;
+    }
     const tenantId = user.tenantId;
     const viewer = { uid: user.uid, role: user.role ?? 'ANALYST' };
 
@@ -77,27 +81,19 @@ function CRMApp() {
           loadProcessesFromFirestore(tenantId, viewer),
           getTenant(tenantId),
         ]);
-        if (isMounted && tenant) setIsDemoTenant(tenant.demoMode);
+        if (!isMounted) return;
+        if (tenant) setIsDemoTenant(tenant.demoMode);
 
-        if (cloudProcesses && cloudProcesses.length > 0) {
-          if (!isMounted) return;
-          setProcesses((current) => {
-            const merged = mergeProcessesLists(current, cloudProcesses);
-            saveProcesses(merged);
-            if (merged.length > cloudProcesses.length) {
-              syncProcessesToFirestore(tenantId, merged);
-            }
-            return merged;
-          });
+        if (cloudProcesses.length > 0) {
+          saveProcesses(cloudProcesses);
+          setProcesses(cloudProcesses);
+        } else if (tenant?.demoMode) {
+          const demo = reloadDefaultProcesses();
+          setProcesses(demo);
+          await syncProcessesToFirestore(tenantId, demo);
         } else {
-          const currentProcesses = loadProcesses();
-          if (currentProcesses && currentProcesses.length > 0) {
-            await syncProcessesToFirestore(tenantId, currentProcesses);
-          } else if (tenant?.demoMode) {
-            const demo = reloadDefaultProcesses();
-            if (isMounted) setProcesses(demo);
-            await syncProcessesToFirestore(tenantId, demo);
-          }
+          clearAllProcesses();
+          setProcesses([]);
         }
       } catch (err) {
         console.warn('Initial cloud sync notice:', err);
@@ -108,11 +104,8 @@ function CRMApp() {
 
     const unsubscribe = subscribeToProcesses(tenantId, viewer, (cloudProcesses) => {
       if (!isMounted) return;
-      setProcesses((current) => {
-        const merged = mergeProcessesLists(current, cloudProcesses);
-        saveProcesses(merged);
-        return merged;
-      });
+      saveProcesses(cloudProcesses);
+      setProcesses(cloudProcesses);
     });
 
     return () => {
