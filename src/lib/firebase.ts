@@ -33,6 +33,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { ClientProcess, TenantRole, UserProfile } from '../types';
+import { USE_MOCK_DATA } from '../config';
 import {
   repairProcessFields,
   getDeletedProcessIds,
@@ -240,6 +241,7 @@ export async function syncProcessesToFirestore(
   tenantId: string,
   processes: ClientProcess[]
 ): Promise<{ success: boolean; count: number; error?: string }> {
+  if (USE_MOCK_DATA) return { success: true, count: 0 };
   if (isFirestoreQuotaExhausted) {
     return { success: false, count: 0, error: 'Quota diária do Firestore atingida' };
   }
@@ -289,6 +291,7 @@ export async function syncProcessesToFirestore(
  * Save single process to Firestore immediately with sanitization
  */
 export async function saveProcessToFirestore(tenantId: string, process: ClientProcess): Promise<boolean> {
+  if (USE_MOCK_DATA) return true;
   if (isFirestoreQuotaExhausted || !tenantId || !process || !process.id) return false;
   try {
     const sanitized = sanitizeForFirestore(repairProcessFields(process));
@@ -317,6 +320,7 @@ export async function saveProcessToFirestore(tenantId: string, process: ClientPr
  * Permanently delete single process from Firestore and mark locally
  */
 export async function deleteProcessFromFirestore(tenantId: string, processId: string): Promise<boolean> {
+  if (USE_MOCK_DATA) return true;
   if (!tenantId || !processId) return false;
 
   // Register locally so concurrent listener doesn't resurrect it
@@ -341,6 +345,7 @@ export async function deleteProcessFromFirestore(tenantId: string, processId: st
  * Clear all process documents from Firestore (e.g., when user explicitly wipes dataset)
  */
 export async function clearAllProcessesInFirestore(tenantId: string): Promise<boolean> {
+  if (USE_MOCK_DATA) return true;
   if (isFirestoreQuotaExhausted || !tenantId) return false;
   try {
     const q = query(processesCol(tenantId));
@@ -369,7 +374,7 @@ export async function loadProcessesFromFirestore(
   tenantId: string,
   viewer?: ProcessViewer
 ): Promise<ClientProcess[]> {
-  if (isFirestoreQuotaExhausted || !tenantId) return [];
+  if (USE_MOCK_DATA || isFirestoreQuotaExhausted || !tenantId) return [];
   try {
     const querySnapshot = await getDocs(processesQuery(tenantId, viewer));
     const processes: ClientProcess[] = [];
@@ -400,7 +405,7 @@ export function subscribeToProcesses(
   onUpdate: (processes: ClientProcess[]) => void,
   onError?: (err: any) => void
 ) {
-  if (isFirestoreQuotaExhausted || !tenantId) return () => {};
+  if (USE_MOCK_DATA || isFirestoreQuotaExhausted || !tenantId) return () => {};
   try {
     const deletedIds = getDeletedProcessIds();
 
