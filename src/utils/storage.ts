@@ -1,7 +1,7 @@
 import { ClientProcess, ProcessStage } from '../types';
 import { INITIAL_PROCESSES } from '../data/defaultData';
 import { getFullDefaultChecklist } from './constants';
-import { formatCurrency, parseMonthYearString } from './formatters';
+import { parseMonthYearString } from './formatters';
 
 const STORAGE_KEY = 'morada_credito_processes_v2';
 const HAS_INITIALIZED_KEY = 'morada_credito_initialized_v2';
