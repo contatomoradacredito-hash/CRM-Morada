@@ -24,13 +24,14 @@ import {
   doc,
   setDoc,
   deleteDoc,
+  getDoc,
   getDocs,
   writeBatch,
   onSnapshot,
   query,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { ClientProcess } from '../types';
+import { ClientProcess, UserProfile } from '../types';
 import {
   repairProcessFields,
   getDeletedProcessIds,
@@ -80,6 +81,25 @@ export {
 };
 
 export type { User };
+
+export async function getUserProfile(uid: string): Promise<UserProfile | null> {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (!snap.exists()) return null;
+    const data = snap.data() as any;
+    if (!data.tenantId || !data.role) return null;
+    return {
+      uid,
+      tenantId: data.tenantId,
+      role: data.role,
+      email: data.email || '',
+      displayName: data.displayName || '',
+    };
+  } catch (error: any) {
+    console.warn('Erro ao carregar perfil do usuário:', error?.message || error);
+    return null;
+  }
+}
 
 // Firestore collection name for processes
 const PROCESSES_COLLECTION = 'processes';

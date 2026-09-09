@@ -163,3 +163,13 @@ export interface SimulationParameters {
   clientName?: string;
   clientPhone?: string;
 }
+
+export type TenantRole = 'OWNER' | 'ADMIN' | 'ANALYST';
+
+export interface UserProfile {
+  uid: string;
+  tenantId: string;
+  role: TenantRole;
+  email: string;
+  displayName: string;
+}
