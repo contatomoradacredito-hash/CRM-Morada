@@ -34,12 +34,14 @@ import {
   loadProcessesFromFirestore,
   subscribeToProcesses,
   mergeProcessesLists,
+  getTenant,
 } from './lib/firebase';
 import { Building2 } from 'lucide-react';
 
 function CRMApp() {
   const { user, loading, pendingAccess, logout } = useAuth();
   const [processes, setProcesses] = useState<ClientProcess[]>(() => loadProcesses());
+  const [isDemoTenant, setIsDemoTenant] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'pipeline' | 'table' | 'financial' | 'simulator' | 'whatsapp'>('pipeline');
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
   const [selectedBankFilter, setSelectedBankFilter] = useState<string>('ALL');
@@ -71,7 +73,11 @@ function CRMApp() {
 
     async function initializeCloudSync() {
       try {
-        const cloudProcesses = await loadProcessesFromFirestore(tenantId, viewer);
+        const [cloudProcesses, tenant] = await Promise.all([
+          loadProcessesFromFirestore(tenantId, viewer),
+          getTenant(tenantId),
+        ]);
+        if (isMounted && tenant) setIsDemoTenant(tenant.demoMode);
 
         if (cloudProcesses && cloudProcesses.length > 0) {
           if (!isMounted) return;
@@ -87,6 +93,10 @@ function CRMApp() {
           const currentProcesses = loadProcesses();
           if (currentProcesses && currentProcesses.length > 0) {
             await syncProcessesToFirestore(tenantId, currentProcesses);
+          } else if (tenant?.demoMode) {
+            const demo = reloadDefaultProcesses();
+            if (isMounted) setProcesses(demo);
+            await syncProcessesToFirestore(tenantId, demo);
           }
         }
       } catch (err) {
@@ -325,6 +335,7 @@ function CRMApp() {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         processes={processes}
+        isDemo={isDemoTenant}
       />
 
       {/* Main Content Area - Wide Full Canvas */}

@@ -102,13 +102,13 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   }
 }
 
-export async function getTenant(tenantId: string): Promise<{ name: string } | null> {
+export async function getTenant(tenantId: string): Promise<{ name: string; demoMode: boolean } | null> {
   if (!tenantId) return null;
   try {
     const snap = await getDoc(doc(db, 'tenants', tenantId));
     if (!snap.exists()) return null;
     const data = snap.data() as any;
-    return { name: data.name || tenantId };
+    return { name: data.name || tenantId, demoMode: !!data.demoMode };
   } catch {
     return null;
   }

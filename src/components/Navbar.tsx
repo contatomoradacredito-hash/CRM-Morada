@@ -42,6 +42,7 @@ interface NavbarProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   processes: ClientProcess[];
+  isDemo?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -58,6 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   searchQuery,
   setSearchQuery,
   processes,
+  isDemo,
 }) => {
   const { user, logout } = useAuth();
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
@@ -160,6 +162,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Plus className="w-4 h-4" />
               <span>Novo Processo</span>
             </button>
+
+            {isDemo && (
+              <span className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-extrabold tracking-wider">
+                DEMO
+              </span>
+            )}
 
             {/* User Profile & Logout */}
             {user && (
