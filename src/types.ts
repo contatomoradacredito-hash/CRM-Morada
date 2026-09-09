@@ -139,6 +139,7 @@ export interface ClientProcess {
   valuationNotes?: string;
   legalNotes?: string;
   declineReason?: string;
+  ownerUid?: string;
 }
 
 export interface BankCommissionRule {

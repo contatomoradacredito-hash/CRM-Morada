@@ -29,9 +29,10 @@ import {
   writeBatch,
   onSnapshot,
   query,
+  where,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { ClientProcess, UserProfile } from '../types';
+import { ClientProcess, TenantRole, UserProfile } from '../types';
 import {
   repairProcessFields,
   getDeletedProcessIds,
@@ -101,8 +102,28 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   }
 }
 
-// Firestore collection name for processes
-const PROCESSES_COLLECTION = 'processes';
+const TENANTS_COLLECTION = 'tenants';
+const PROCESSES_SUBCOLLECTION = 'processes';
+
+export interface ProcessViewer {
+  uid: string;
+  role: TenantRole;
+}
+
+function processesCol(tenantId: string) {
+  return collection(db, TENANTS_COLLECTION, tenantId, PROCESSES_SUBCOLLECTION);
+}
+
+function processDocRef(tenantId: string, processId: string) {
+  return doc(db, TENANTS_COLLECTION, tenantId, PROCESSES_SUBCOLLECTION, processId);
+}
+
+function processesQuery(tenantId: string, viewer?: ProcessViewer) {
+  const col = processesCol(tenantId);
+  return viewer && viewer.role === 'ANALYST'
+    ? query(col, where('ownerUid', '==', viewer.uid))
+    : query(col);
+}
 
 // Circuit breaker flag to prevent infinite retry loops if daily free quota is hit
 let isFirestoreQuotaExhausted = false;
@@ -139,18 +160,6 @@ export function sanitizeForFirestore<T>(data: T): T {
     return cleaned as T;
   }
   return data;
-}
-
-/**
- * Validates active connection and health of Firestore
- */
-export async function testConnection(): Promise<boolean> {
-  try {
-    const meta = await getFirestoreMetadata();
-    return meta.connected;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -195,12 +204,13 @@ export function mergeProcessesLists(
  * Save / sync all processes to Firestore in chunked batches of 200 items (Firestore limit is 500)
  */
 export async function syncProcessesToFirestore(
+  tenantId: string,
   processes: ClientProcess[]
 ): Promise<{ success: boolean; count: number; error?: string }> {
   if (isFirestoreQuotaExhausted) {
     return { success: false, count: 0, error: 'Quota diária do Firestore atingida' };
   }
-  if (!processes || processes.length === 0) {
+  if (!tenantId || !processes || processes.length === 0) {
     return { success: true, count: 0 };
   }
   try {
@@ -215,7 +225,7 @@ export async function syncProcessesToFirestore(
       for (const rawProc of chunk) {
         if (!rawProc || !rawProc.id || deletedIds.has(rawProc.id)) continue;
         const sanitized = sanitizeForFirestore(repairProcessFields(rawProc));
-        const processRef = doc(db, PROCESSES_COLLECTION, sanitized.id);
+        const processRef = processDocRef(tenantId, sanitized.id);
         batch.set(
           processRef,
           {
@@ -245,11 +255,11 @@ export async function syncProcessesToFirestore(
 /**
  * Save single process to Firestore immediately with sanitization
  */
-export async function saveProcessToFirestore(process: ClientProcess): Promise<boolean> {
-  if (isFirestoreQuotaExhausted || !process || !process.id) return false;
+export async function saveProcessToFirestore(tenantId: string, process: ClientProcess): Promise<boolean> {
+  if (isFirestoreQuotaExhausted || !tenantId || !process || !process.id) return false;
   try {
     const sanitized = sanitizeForFirestore(repairProcessFields(process));
-    const processRef = doc(db, PROCESSES_COLLECTION, sanitized.id);
+    const processRef = processDocRef(tenantId, sanitized.id);
     await setDoc(
       processRef,
       {
@@ -273,15 +283,15 @@ export async function saveProcessToFirestore(process: ClientProcess): Promise<bo
 /**
  * Permanently delete single process from Firestore and mark locally
  */
-export async function deleteProcessFromFirestore(processId: string): Promise<boolean> {
-  if (!processId) return false;
-  
+export async function deleteProcessFromFirestore(tenantId: string, processId: string): Promise<boolean> {
+  if (!tenantId || !processId) return false;
+
   // Register locally so concurrent listener doesn't resurrect it
   markProcessAsDeletedLocally(processId);
 
   if (isFirestoreQuotaExhausted) return false;
   try {
-    const processRef = doc(db, PROCESSES_COLLECTION, processId);
+    const processRef = processDocRef(tenantId, processId);
     await deleteDoc(processRef);
     return true;
   } catch (error: any) {
@@ -297,10 +307,10 @@ export async function deleteProcessFromFirestore(processId: string): Promise<boo
 /**
  * Clear all process documents from Firestore (e.g., when user explicitly wipes dataset)
  */
-export async function clearAllProcessesInFirestore(): Promise<boolean> {
-  if (isFirestoreQuotaExhausted) return false;
+export async function clearAllProcessesInFirestore(tenantId: string): Promise<boolean> {
+  if (isFirestoreQuotaExhausted || !tenantId) return false;
   try {
-    const q = query(collection(db, PROCESSES_COLLECTION));
+    const q = query(processesCol(tenantId));
     const snap = await getDocs(q);
     const chunkSize = 200;
     const docs = snap.docs;
@@ -322,17 +332,19 @@ export async function clearAllProcessesInFirestore(): Promise<boolean> {
 /**
  * Load processes from Firestore
  */
-export async function loadProcessesFromFirestore(): Promise<ClientProcess[]> {
-  if (isFirestoreQuotaExhausted) return [];
+export async function loadProcessesFromFirestore(
+  tenantId: string,
+  viewer?: ProcessViewer
+): Promise<ClientProcess[]> {
+  if (isFirestoreQuotaExhausted || !tenantId) return [];
   try {
-    const q = query(collection(db, PROCESSES_COLLECTION));
-    const querySnapshot = await getDocs(q);
+    const querySnapshot = await getDocs(processesQuery(tenantId, viewer));
     const processes: ClientProcess[] = [];
     const deletedIds = getDeletedProcessIds();
 
-    querySnapshot.forEach((doc) => {
-      const data = doc.data() as any;
-      if (!data.isDeleted && !deletedIds.has(doc.id)) {
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as any;
+      if (!data.isDeleted && !deletedIds.has(docSnap.id)) {
         processes.push(repairProcessFields(data as ClientProcess));
       }
     });
@@ -350,21 +362,22 @@ export async function loadProcessesFromFirestore(): Promise<ClientProcess[]> {
  * Real-time listener for processes in Firestore with safe callback
  */
 export function subscribeToProcesses(
+  tenantId: string,
+  viewer: ProcessViewer | undefined,
   onUpdate: (processes: ClientProcess[]) => void,
   onError?: (err: any) => void
 ) {
-  if (isFirestoreQuotaExhausted) return () => {};
+  if (isFirestoreQuotaExhausted || !tenantId) return () => {};
   try {
-    const q = query(collection(db, PROCESSES_COLLECTION));
     const deletedIds = getDeletedProcessIds();
 
     return onSnapshot(
-      q,
+      processesQuery(tenantId, viewer),
       (querySnapshot) => {
         const processes: ClientProcess[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data() as any;
-          if (!data.isDeleted && !deletedIds.has(doc.id)) {
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          if (!data.isDeleted && !deletedIds.has(docSnap.id)) {
             processes.push(repairProcessFields(data as ClientProcess));
           }
         });
@@ -390,7 +403,7 @@ export function subscribeToProcesses(
 /**
  * Returns diagnostic metadata about the connected Firestore database
  */
-export async function getFirestoreMetadata(): Promise<{
+export async function getFirestoreMetadata(tenantId: string): Promise<{
   connected: boolean;
   databaseId: string;
   projectId: string;
@@ -406,7 +419,7 @@ export async function getFirestoreMetadata(): Promise<{
   };
 
   try {
-    const q = query(collection(db, PROCESSES_COLLECTION));
+    const q = query(processesCol(tenantId));
     const snap = await getDocs(q);
     meta.connected = true;
     meta.totalDocuments = snap.docs.filter((d) => !d.data()?.isDeleted).length;

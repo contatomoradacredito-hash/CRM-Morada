@@ -34,7 +34,6 @@ import {
   loadProcessesFromFirestore,
   subscribeToProcesses,
   mergeProcessesLists,
-  testConnection,
 } from './lib/firebase';
 import { Building2 } from 'lucide-react';
 
@@ -63,35 +62,31 @@ function CRMApp() {
     }, 3500);
   }, []);
 
-  // Sync with Firestore & localStorage with non-destructive merge and automatic initial upload
   useEffect(() => {
-    if (!user) return;
+    if (!user?.tenantId) return;
+    const tenantId = user.tenantId;
+    const viewer = { uid: user.uid, role: user.role ?? 'ANALYST' };
 
     let isMounted = true;
 
     async function initializeCloudSync() {
       try {
-        const cloudProcesses = await loadProcessesFromFirestore();
+        const cloudProcesses = await loadProcessesFromFirestore(tenantId, viewer);
 
         if (cloudProcesses && cloudProcesses.length > 0) {
           if (!isMounted) return;
           setProcesses((current) => {
             const merged = mergeProcessesLists(current, cloudProcesses);
             saveProcesses(merged);
-            // If local dataset had new or un-synced items, update Firestore
             if (merged.length > cloudProcesses.length) {
-              syncProcessesToFirestore(merged);
+              syncProcessesToFirestore(tenantId, merged);
             }
             return merged;
           });
         } else {
-          // Cloud database is empty or freshly zeroed: keep it clean and do not auto-inject sample data
           const currentProcesses = loadProcesses();
           if (currentProcesses && currentProcesses.length > 0) {
-            const res = await syncProcessesToFirestore(currentProcesses);
-            if (res.success && isMounted) {
-              console.log(`Sincronizados ${res.count} processos com o Firestore.`);
-            }
+            await syncProcessesToFirestore(tenantId, currentProcesses);
           }
         }
       } catch (err) {
@@ -101,8 +96,7 @@ function CRMApp() {
 
     initializeCloudSync();
 
-    // Real-time Firestore synchronization
-    const unsubscribe = subscribeToProcesses((cloudProcesses) => {
+    const unsubscribe = subscribeToProcesses(tenantId, viewer, (cloudProcesses) => {
       if (!isMounted) return;
       setProcesses((current) => {
         const merged = mergeProcessesLists(current, cloudProcesses);
@@ -157,8 +151,8 @@ function CRMApp() {
       return updated;
     });
 
-    if (updatedProcess) {
-      saveProcessToFirestore(updatedProcess);
+    if (updatedProcess && user?.tenantId) {
+      saveProcessToFirestore(user.tenantId, updatedProcess);
     }
     showToast(`Processo atualizado para ${STAGE_CONFIGS[nextStage]?.shortLabel || nextStage}`);
   };
@@ -191,8 +185,8 @@ function CRMApp() {
       return updated;
     });
 
-    if (updatedProcess) {
-      saveProcessToFirestore(updatedProcess);
+    if (updatedProcess && user?.tenantId) {
+      saveProcessToFirestore(user.tenantId, updatedProcess);
     }
     showToast(`Análise de crédito atualizada para: ${CREDIT_ANALYSIS_STATUS_CONFIGS[status]?.label || status}`);
   };
@@ -203,7 +197,7 @@ function CRMApp() {
       saveProcesses(list);
       return list;
     });
-    saveProcessToFirestore(updatedProc);
+    if (user?.tenantId) saveProcessToFirestore(user.tenantId, updatedProc);
     showToast(`Processo de ${updatedProc.clientName} salvo com sucesso!`);
   };
 
@@ -213,18 +207,19 @@ function CRMApp() {
       saveProcesses(list);
       return list;
     });
-    deleteProcessFromFirestore(processId);
+    if (user?.tenantId) deleteProcessFromFirestore(user.tenantId, processId);
     showToast('Processo excluído.');
   };
 
   const handleCreateProcess = (newProc: ClientProcess) => {
+    const withOwner: ClientProcess = { ...newProc, ownerUid: newProc.ownerUid || user?.uid };
     setProcesses((prev) => {
-      const updated = [newProc, ...prev.filter((p) => p.id !== newProc.id)];
+      const updated = [withOwner, ...prev.filter((p) => p.id !== withOwner.id)];
       saveProcesses(updated);
       return updated;
     });
-    saveProcessToFirestore(newProc);
-    showToast(`Novo processo de ${newProc.clientName} adicionado ao funil com sucesso!`);
+    if (user?.tenantId) saveProcessToFirestore(user.tenantId, withOwner);
+    showToast(`Novo processo de ${withOwner.clientName} adicionado ao funil com sucesso!`);
   };
 
   const handleCreateProcessFromSim = (simData: {
@@ -252,7 +247,7 @@ function CRMApp() {
   const handleResetData = () => {
     const defaultData = reloadDefaultProcesses();
     setProcesses(defaultData);
-    syncProcessesToFirestore(defaultData).catch(() => {});
+    if (user?.tenantId) syncProcessesToFirestore(user.tenantId, defaultData).catch(() => {});
     showToast('Dados de exemplo da Morada Crédito recarregados.');
   };
 
@@ -425,7 +420,7 @@ function CRMApp() {
           onUpdateProcesses={(updated) => {
             setProcesses(updated);
             saveProcesses(updated);
-            syncProcessesToFirestore(updated).catch(() => {});
+            if (user?.tenantId) syncProcessesToFirestore(user.tenantId, updated).catch(() => {});
           }}
           onOpenNewProcessWithMonth={handleOpenNewProcessWithMonth}
           showToast={showToast}

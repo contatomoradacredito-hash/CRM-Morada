@@ -39,6 +39,7 @@ import {
   getFirestoreMetadata,
   firebaseConfig,
 } from '../lib/firebase';
+import { useAuth } from '../context/AuthContext';
 
 interface DataManagementModalProps {
   isOpen: boolean;
@@ -57,6 +58,10 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   onOpenNewProcessWithMonth,
   showToast,
 }) => {
+  const { user } = useAuth();
+  const tenantId = user?.tenantId;
+  const viewer = user ? { uid: user.uid, role: user.role ?? 'ANALYST' } : undefined;
+
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
   const [confirmClear, setConfirmClear] = useState<boolean>(false);
@@ -72,16 +77,17 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   } | null>(null);
 
   useEffect(() => {
-    getFirestoreMetadata().then(setCloudStats).catch(() => {});
-  }, [processes]);
+    if (tenantId) getFirestoreMetadata(tenantId).then(setCloudStats).catch(() => {});
+  }, [processes, tenantId]);
 
   const handleSyncAllToFirebase = async () => {
+    if (!tenantId) return;
     setIsSyncingCloud(true);
     try {
-      const res = await syncProcessesToFirestore(processes);
+      const res = await syncProcessesToFirestore(tenantId, processes);
       if (res.success) {
         showToast(`Sucesso! ${res.count} processos do histórico de 12 meses foram sincronizados na base Firebase.`);
-        const meta = await getFirestoreMetadata();
+        const meta = await getFirestoreMetadata(tenantId);
         setCloudStats(meta);
       } else {
         showToast('Dados salvos com sucesso na sincronização contínua.');
@@ -94,13 +100,14 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleDownloadFromFirebase = async () => {
+    if (!tenantId) return;
     setIsSyncingCloud(true);
     try {
-      const cloudProcs = await loadProcessesFromFirestore();
+      const cloudProcs = await loadProcessesFromFirestore(tenantId, viewer);
       if (cloudProcs && cloudProcs.length > 0) {
         onUpdateProcesses(cloudProcs);
         showToast(`${cloudProcs.length} processos carregados da nuvem Firebase com sucesso!`);
-        const meta = await getFirestoreMetadata();
+        const meta = await getFirestoreMetadata(tenantId);
         setCloudStats(meta);
       } else {
         showToast('Nenhum processo salvo na nuvem ainda. Clique em Sincronizar para enviar.');
@@ -115,7 +122,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   const handleClearAll = async () => {
     clearAllProcesses();
     onUpdateProcesses([]);
-    clearAllProcessesInFirestore().catch(() => {});
+    if (tenantId) clearAllProcessesInFirestore(tenantId).catch(() => {});
     showToast('Base de dados zerada com sucesso na máquina e na nuvem!');
     setConfirmClear(false);
     onClose();
@@ -124,7 +131,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   const handleRestoreSampleData = () => {
     const defaultData = reloadDefaultProcesses();
     onUpdateProcesses(defaultData);
-    syncProcessesToFirestore(defaultData).catch(() => {});
+    if (tenantId) syncProcessesToFirestore(tenantId, defaultData).catch(() => {});
     showToast('Base modelo com histórico anual recarregada e sincronizada!');
     onClose();
   };
