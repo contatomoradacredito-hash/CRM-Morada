@@ -8,7 +8,7 @@ Instale as dependências com `bun install --frozen-lockfile`. Valide primeiro (n
 npm run import:history -- --file '/caminho/fora/do/repositorio/historico.csv'
 ```
 
-Após revisão, QA e OK explícito da dona do produto sobre o acesso ao histórico sem `ownerUid` (restrito a OWNER/ADMIN), configure ADC com uma service account autorizada para o projeto de produção e execute com o ID do projeto explicitamente informado:
+Após revisão, validação de qualidade e aprovação de produto sobre o acesso ao histórico sem `ownerUid` (restrito a OWNER/ADMIN), configure ADC com uma service account autorizada para o projeto de produção e execute com o ID do projeto explicitamente informado:
 
 ```sh
 export GOOGLE_APPLICATION_CREDENTIALS='/caminho/seguro/service-account.json'
@@ -23,9 +23,9 @@ Enums desconhecidos, inclusive banco, são rejeitados por linha, sem fallback. O
 
 O cabeçalho deve manter todas as 21 colunas do layout original, mesmo quando os valores de uma coluna forem vazios; apenas as colunas adicionais de cartório e protocolo RGI são opcionais. Confirme esse layout em cada exportação de produção. Os números devem vir sem separador de milhar e sem símbolo de moeda: por exemplo, `1200000,00` ou `1200000.00`, nunca `1.200.000,00` ou `R$ 500.000,00`.
 
-Nenhum documento recebe `ownerUid`. As regras atuais usam OWNER/ADMIN/ANALYST e permitem leitura desses documentos a OWNER e ADMIN; ANALYST não pode ler nem editar esse histórico. MANAGER não existe neste worktree. O import não altera RBAC.
+Nenhum documento recebe `ownerUid`. As regras atuais usam OWNER/ADMIN/ANALYST e permitem leitura desses documentos a OWNER e ADMIN; ANALYST não pode ler nem editar esse histórico. O papel MANAGER não faz parte do modelo de acesso. O import não altera RBAC.
 
-Decisão de Produto confirmada explicitamente por Amanda: os 68 registros históricos sem `ownerUid` podem ser visualizados e editados somente por OWNER e ADMIN do tenant `morada-credito`. Nenhum ANALYST, incluindo corretores, pode visualizar ou editar esses processos. O gate de governança está liberado. A Sentinela deve concluir o QA, incluindo regressão da UI; a gravação real depende de sua aprovação, com autorização também para que ela execute `--write` como parte do teste. Após aprovação do QA, a Sentinela aciona Cais para abrir o PR de `data/import-planilha-real` com base em `development`.
+Decisão de produto confirmada: os 68 registros históricos sem `ownerUid` podem ser visualizados e editados somente por OWNER e ADMIN do tenant `morada-credito`. Nenhum ANALYST pode visualizar ou editar esses processos. O gate de governança está liberado.
 
 Verificações:
 
@@ -36,4 +36,4 @@ npm run lint
 npm run build
 ```
 
-Os testes usam apenas dados fictícios e um armazenamento em memória para verificar idempotência e concorrência. Não substituem o teste de integração da Sentinela no emulador/ambiente autorizado. O QA também deve verificar a regressão da importação pela UI, pois `src/utils/storage.ts` é compartilhado com o app.
+Os testes usam apenas dados fictícios e um armazenamento em memória para verificar idempotência e concorrência. Não substituem os testes de integração no emulador ou em ambiente autorizado. A validação também deve verificar a regressão da importação pela UI, pois `src/utils/storage.ts` é compartilhado com o app.

@@ -16,7 +16,7 @@ Uma aplicação modificada pode omitir eventos ou inventar action, targetTenantI
 
 ## Retenção
 
-A retenção aprovada é de 12 meses. A v1 não ativa a política TTL nativa: exclusões TTL exigem billing habilitado no projeto Firebase, e a Amanda decidiu não habilitá-lo nesta entrega. Portanto, a expiração **não é automática**. Um operador deve executar a limpeza periodicamente até que uma política nativa seja aprovada e ativada.
+A retenção aprovada é de 12 meses. A v1 não ativa a política TTL nativa: exclusões TTL exigem billing habilitado no projeto Firebase. Por decisão de produto, o billing não foi habilitado nesta entrega. Portanto, a expiração **não é automática**. Um operador deve executar a limpeza periodicamente até que uma política nativa seja aprovada e ativada.
 
 O script usa o campo `timestamp` do servidor, calcula o corte de 12 meses e não imprime documentos nem dados pessoais. Ele consulta somente a coleção raiz `auditLog`. O modo padrão apenas conta os documentos vencidos:
 
