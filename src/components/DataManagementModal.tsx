@@ -24,8 +24,6 @@ import {
 import { ClientProcess } from '../types';
 import {
   clearAllProcesses,
-  exportProcessesToCSV,
-  exportProcessesToJSON,
   reloadDefaultProcesses,
   downloadHistorySpreadsheetTemplate,
   parseProcessesFromCSV,
@@ -48,6 +46,8 @@ interface DataManagementModalProps {
   onUpdateProcesses: (processes: ClientProcess[]) => void;
   onOpenNewProcessWithMonth: (month: string) => void;
   showToast: (msg: string) => void;
+  onExportCSV: () => void;
+  onExportJSON: () => void;
 }
 
 export const DataManagementModal: React.FC<DataManagementModalProps> = ({
@@ -57,6 +57,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   onUpdateProcesses,
   onOpenNewProcessWithMonth,
   showToast,
+  onExportCSV,
+  onExportJSON,
 }) => {
   const { user } = useAuth();
   const tenantId = user?.tenantId;
@@ -594,7 +596,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
             
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
-                onClick={() => exportProcessesToCSV(processes)}
+                onClick={onExportCSV}
                 className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 border border-slate-200 cursor-pointer"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
@@ -602,7 +604,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
               </button>
 
               <button
-                onClick={() => exportProcessesToJSON(processes)}
+                onClick={onExportJSON}
                 className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 border border-slate-200 cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5 text-slate-600" />
@@ -646,4 +648,3 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
     </div>
   );
 };
-
