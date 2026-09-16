@@ -28,6 +28,7 @@ import { DataManagementModal } from './components/DataManagementModal';
 import { LoginScreen } from './components/LoginScreen';
 import { CREDIT_ANALYSIS_STATUS_CONFIGS, STAGE_CONFIGS } from './utils/constants';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { USE_MOCK_DATA } from './config';
 import {
   syncProcessesToFirestore,
   saveProcessToFirestore,
@@ -65,6 +66,10 @@ function CRMApp() {
   }, []);
 
   useEffect(() => {
+    if (USE_MOCK_DATA) {
+      setProcesses(reloadDefaultProcesses());
+      return;
+    }
     if (!user?.tenantId) {
       clearAllProcesses();
       setProcesses([]);
@@ -248,10 +253,8 @@ function CRMApp() {
   };
 
   const handleResetData = () => {
-    const defaultData = reloadDefaultProcesses();
-    setProcesses(defaultData);
-    if (user?.tenantId) syncProcessesToFirestore(user.tenantId, defaultData).catch(() => {});
-    showToast('Dados de exemplo da Morada Crédito recarregados.');
+    setProcesses(reloadDefaultProcesses());
+    showToast('Dados de exemplo carregados localmente.');
   };
 
   const handleOpenNewProcessWithMonth = (month: string) => {
@@ -424,7 +427,6 @@ function CRMApp() {
           onUpdateProcesses={(updated) => {
             setProcesses(updated);
             saveProcesses(updated);
-            if (user?.tenantId) syncProcessesToFirestore(user.tenantId, updated).catch(() => {});
           }}
           onOpenNewProcessWithMonth={handleOpenNewProcessWithMonth}
           showToast={showToast}

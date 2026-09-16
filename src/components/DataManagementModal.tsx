@@ -129,10 +129,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleRestoreSampleData = () => {
-    const defaultData = reloadDefaultProcesses();
-    onUpdateProcesses(defaultData);
-    if (tenantId) syncProcessesToFirestore(tenantId, defaultData).catch(() => {});
-    showToast('Base modelo com histórico anual recarregada e sincronizada!');
+    onUpdateProcesses(reloadDefaultProcesses());
+    showToast('Dados de exemplo carregados localmente (não sincronizados).');
     onClose();
   };
 
@@ -146,14 +144,10 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
         const content = event.target?.result as string;
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed)) {
-          if (importMode === 'replace') {
-            onUpdateProcesses(parsed);
-            showToast(`${parsed.length} processos importados substituindo a base!`);
-          } else {
-            const merged = [...processes, ...parsed];
-            onUpdateProcesses(merged);
-            showToast(`${parsed.length} processos adicionados à base atual!`);
-          }
+          const next = importMode === 'replace' ? parsed : [...processes, ...parsed];
+          onUpdateProcesses(next);
+          if (tenantId) syncProcessesToFirestore(tenantId, next).catch(() => {});
+          showToast(`${parsed.length} processos importados!`);
           onClose();
         } else {
           setImportError('Arquivo JSON inválido. O arquivo deve conter uma lista de processos.');
@@ -181,14 +175,10 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
           return;
         }
 
-        if (importMode === 'replace') {
-          onUpdateProcesses(result.processes);
-          showToast(`${result.processes.length} processos dos 12 meses importados com sucesso com colunas de Corretor, Mês e Cidade alinhadas!`);
-        } else {
-          const merged = [...processes, ...result.processes];
-          onUpdateProcesses(merged);
-          showToast(`${result.processes.length} processos dos 12 meses adicionados à base com mapeamento inteligente de colunas!`);
-        }
+        const next = importMode === 'replace' ? result.processes : [...processes, ...result.processes];
+        onUpdateProcesses(next);
+        if (tenantId) syncProcessesToFirestore(tenantId, next).catch(() => {});
+        showToast(`${result.processes.length} processos importados.`);
         onClose();
       } catch (err: any) {
         setImportError(`Erro ao ler CSV: ${err?.message || 'Arquivo corrompido'}`);
