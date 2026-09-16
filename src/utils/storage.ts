@@ -3,13 +3,41 @@ import { INITIAL_PROCESSES } from '../data/defaultData';
 import { getFullDefaultChecklist } from './constants';
 import { parseMonthYearString } from './formatters';
 
-const STORAGE_KEY = 'morada_credito_processes_v2';
-const HAS_INITIALIZED_KEY = 'morada_credito_initialized_v2';
-const DELETED_IDS_KEY = 'morada_credito_deleted_ids_v2';
+export interface StorageScope {
+  uid: string;
+  tenantId: string;
+  role: string;
+}
 
-export function getDeletedProcessIds(): Set<string> {
+const LEGACY_KEYS = [
+  'morada_credito_processes_v2',
+  'morada_credito_initialized_v2',
+  'morada_credito_deleted_ids_v2',
+];
+
+function storageKey(scope: StorageScope, kind: string): string {
+  if (!scope.uid || !scope.tenantId || !scope.role) throw new Error('Cache exige escopo autenticado');
+  return `morada_credito_v3:${encodeURIComponent(scope.tenantId)}:${encodeURIComponent(scope.uid)}:${encodeURIComponent(scope.role)}:${kind}`;
+}
+
+// Legacy data has no verifiable owner: never migrate it into an authenticated cache.
+export function clearLegacyProcessCache(): void {
   try {
-    const raw = localStorage.getItem(DELETED_IDS_KEY);
+    for (const key of LEGACY_KEYS) localStorage.removeItem(key);
+  } catch { /* Storage may be unavailable in private browsing. */ }
+}
+
+export function clearProcessCache(scope: StorageScope): void {
+  try {
+    for (const kind of ['processes', 'initialized', 'deleted_ids']) {
+      localStorage.removeItem(storageKey(scope, kind));
+    }
+  } catch { /* Logout must still work when storage is unavailable. */ }
+}
+
+export function getDeletedProcessIds(scope: StorageScope): Set<string> {
+  try {
+    const raw = localStorage.getItem(storageKey(scope, 'deleted_ids'));
     if (!raw) return new Set<string>();
     const parsed = JSON.parse(raw);
     return new Set<string>(Array.isArray(parsed) ? parsed : []);
@@ -18,24 +46,24 @@ export function getDeletedProcessIds(): Set<string> {
   }
 }
 
-export function markProcessAsDeletedLocally(id: string): void {
+export function markProcessAsDeletedLocally(scope: StorageScope, id: string): void {
   try {
-    const set = getDeletedProcessIds();
+    const set = getDeletedProcessIds(scope);
     set.add(id);
     // Keep max 1000 deleted IDs to prevent unbounded growth
     const arr = Array.from(set);
     if (arr.length > 1000) {
       arr.splice(0, arr.length - 1000);
     }
-    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(arr));
+    localStorage.setItem(storageKey(scope, 'deleted_ids'), JSON.stringify(arr));
   } catch (e) {
     console.error('Erro ao registrar ID deletado:', e);
   }
 }
 
-export function clearDeletedProcessIds(): void {
+export function clearDeletedProcessIds(scope: StorageScope): void {
   try {
-    localStorage.removeItem(DELETED_IDS_KEY);
+    localStorage.removeItem(storageKey(scope, 'deleted_ids'));
   } catch {}
 }
 
@@ -121,15 +149,15 @@ export function repairProcessesList(processes: ClientProcess[]): { repaired: Cli
   return { repaired, count };
 }
 
-export function loadProcesses(): ClientProcess[] {
+export function loadProcesses(scope: StorageScope): ClientProcess[] {
   try {
-    const initialized = localStorage.getItem(HAS_INITIALIZED_KEY);
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const initialized = localStorage.getItem(storageKey(scope, 'initialized'));
+    const saved = localStorage.getItem(storageKey(scope, 'processes'));
 
     // Initial state is a clean empty base so user can test and create new processes
     if (!initialized) {
-      localStorage.setItem(HAS_INITIALIZED_KEY, 'true');
-      saveProcesses([]);
+      localStorage.setItem(storageKey(scope, 'initialized'), 'true');
+      saveProcesses(scope, []);
       return [];
     }
 
@@ -160,33 +188,72 @@ export function loadProcesses(): ClientProcess[] {
   }
 }
 
-export function saveProcesses(processes: ClientProcess[]): void {
+export function saveProcesses(scope: StorageScope, processes: ClientProcess[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(processes));
-    localStorage.setItem(HAS_INITIALIZED_KEY, 'true');
+    localStorage.setItem(storageKey(scope, 'processes'), JSON.stringify(processes));
+    localStorage.setItem(storageKey(scope, 'initialized'), 'true');
   } catch (error) {
     console.error('Erro ao salvar dados:', error);
   }
 }
 
-export function clearAllProcesses(): void {
+export function clearAllProcesses(scope: StorageScope): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
-    localStorage.setItem(HAS_INITIALIZED_KEY, 'true');
+    localStorage.setItem(storageKey(scope, 'processes'), JSON.stringify([]));
+    localStorage.setItem(storageKey(scope, 'initialized'), 'true');
   } catch (error) {
     console.error('Erro ao zerar dados:', error);
   }
 }
 
-export function reloadDefaultProcesses(): ClientProcess[] {
+export function reloadDefaultProcesses(scope: StorageScope): ClientProcess[] {
   try {
-    clearDeletedProcessIds();
-    saveProcesses(INITIAL_PROCESSES);
+    clearDeletedProcessIds(scope);
+    saveProcesses(scope, INITIAL_PROCESSES);
     return INITIAL_PROCESSES;
   } catch (error) {
     console.error('Erro ao recarregar dados padrão:', error);
     return INITIAL_PROCESSES;
   }
+}
+
+/**
+ * Merge cloud processes with local processes without losing locally created/updated records
+ * and without resurrecting recently deleted processes.
+ */
+export function mergeProcessesLists(
+  scope: StorageScope,
+  localList: ClientProcess[],
+  cloudList: ClientProcess[]
+): ClientProcess[] {
+  const deletedIds = getDeletedProcessIds(scope);
+  const map = new Map<string, ClientProcess>();
+
+  // Add all local processes first (ignoring marked deleted)
+  for (const proc of localList) {
+    if (proc && proc.id && !deletedIds.has(proc.id)) {
+      map.set(proc.id, repairProcessFields(proc));
+    }
+  }
+
+  // Merge cloud processes: take cloud version if newer or not present locally
+  for (const rawCloudProc of cloudList) {
+    if (!rawCloudProc || !rawCloudProc.id || deletedIds.has(rawCloudProc.id)) continue;
+    const cloudProc = repairProcessFields(rawCloudProc);
+    const existing = map.get(cloudProc.id);
+    if (!existing) {
+      map.set(cloudProc.id, cloudProc);
+    } else {
+      // Compare timestamps
+      const cloudTime = new Date(cloudProc.stageUpdatedAt || cloudProc.createdAt || 0).getTime();
+      const localTime = new Date(existing.stageUpdatedAt || existing.createdAt || 0).getTime();
+      if (cloudTime >= localTime) {
+        map.set(cloudProc.id, cloudProc);
+      }
+    }
+  }
+
+  return Array.from(map.values()).map(repairProcessFields);
 }
 
 export function exportProcessesToCSV(processes: ClientProcess[]): void {

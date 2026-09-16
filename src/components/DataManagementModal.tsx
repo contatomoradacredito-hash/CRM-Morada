@@ -60,6 +60,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
 }) => {
   const { user } = useAuth();
   const tenantId = user?.tenantId;
+  const scope = user && tenantId ? { uid: user.uid, tenantId, role: user.role ?? 'ANALYST' } : null;
   const viewer = user ? { uid: user.uid, role: user.role ?? 'ANALYST' } : undefined;
 
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
@@ -81,10 +82,10 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   }, [processes, tenantId]);
 
   const handleSyncAllToFirebase = async () => {
-    if (!tenantId) return;
+    if (!tenantId || !scope) return;
     setIsSyncingCloud(true);
     try {
-      const res = await syncProcessesToFirestore(tenantId, processes);
+      const res = await syncProcessesToFirestore(scope, processes);
       if (res.success) {
         showToast(`Sucesso! ${res.count} processos do histórico de 12 meses foram sincronizados na base Firebase.`);
         const meta = await getFirestoreMetadata(tenantId);
@@ -100,7 +101,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleDownloadFromFirebase = async () => {
-    if (!tenantId) return;
+    if (!tenantId || !scope) return;
     setIsSyncingCloud(true);
     try {
       const cloudProcs = await loadProcessesFromFirestore(tenantId, viewer);
@@ -120,7 +121,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleClearAll = async () => {
-    clearAllProcesses();
+    if (!scope) return;
+    clearAllProcesses(scope);
     onUpdateProcesses([]);
     if (tenantId) clearAllProcessesInFirestore(tenantId).catch(() => {});
     showToast('Base de dados zerada com sucesso na máquina e na nuvem!');
@@ -129,7 +131,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleRestoreSampleData = () => {
-    onUpdateProcesses(reloadDefaultProcesses());
+    if (!scope) return;
+    onUpdateProcesses(reloadDefaultProcesses(scope));
     showToast('Dados de exemplo carregados localmente (não sincronizados).');
     onClose();
   };
@@ -146,7 +149,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
         if (Array.isArray(parsed)) {
           const next = importMode === 'replace' ? parsed : [...processes, ...parsed];
           onUpdateProcesses(next);
-          if (tenantId) syncProcessesToFirestore(tenantId, next).catch(() => {});
+          if (scope) syncProcessesToFirestore(scope, next).catch(() => {});
           showToast(`${parsed.length} processos importados!`);
           onClose();
         } else {
@@ -177,7 +180,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
 
         const next = importMode === 'replace' ? result.processes : [...processes, ...result.processes];
         onUpdateProcesses(next);
-        if (tenantId) syncProcessesToFirestore(tenantId, next).catch(() => {});
+        if (scope) syncProcessesToFirestore(scope, next).catch(() => {});
         showToast(`${result.processes.length} processos importados.`);
         onClose();
       } catch (err: any) {
