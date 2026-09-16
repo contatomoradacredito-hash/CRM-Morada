@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   X,
+  Ban,
   Building,
   User,
   Phone,
@@ -73,6 +74,16 @@ interface ProcessDetailModalProps {
   onAdvanceStage?: (processId: string, nextStage: ProcessStage) => void;
 }
 
+const DECLINE_REASON_TEMPLATES = [
+  'Renda insuficiente',
+  'Restrição no CPF (SPC/Serasa)',
+  'Crédito recusado pelo banco',
+  'Imóvel reprovado na avaliação',
+  'Desistência do cliente',
+  'Documentação incompleta',
+  'Comprometimento de renda acima do limite',
+];
+
 const NOTE_TEMPLATES = [
   { label: '📞 Ligação c/ Cliente', text: 'Contato telefônico realizado com o cliente. Alinhado próximos passos.', category: 'CLIENTE' as const },
   { label: '🏛️ Retorno do Banco', text: 'Contato com o gerente/mesa de crédito do banco operador.', category: 'BANCO' as const },
@@ -115,6 +126,11 @@ export const ProcessDetailModal: React.FC<ProcessDetailModalProps> = ({
     targetStage: ProcessStage;
     reason?: string;
   } | null>(null);
+
+  const handleDeclineReasonChange = (declineReason: string) => {
+    setFormData((previous) => ({ ...previous, declineReason }));
+    setHasUnsavedChanges(true);
+  };
 
   // Recalculate commission when financingValue or commissionPercentage changes
   const handleFinancingOrCommissionChange = (financingVal: number, commPct: number) => {
@@ -607,6 +623,57 @@ export const ProcessDetailModal: React.FC<ProcessDetailModalProps> = ({
               {/* LEFT COLUMN: PRIMARY PROCESS DATA & FORMS (7 COLS) */}
               <div className="lg:col-span-7 space-y-5">
                 
+                {formData.stage === 'DECLINED_CANCELLED' && (
+                  <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-rose-500/30 shadow-xs space-y-3">
+                    <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
+                      <div className="w-8 h-8 shrink-0 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
+                        <Ban className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-xs sm:text-sm text-slate-900 uppercase tracking-wider">
+                          <label htmlFor="modal-decline-reason">Motivo do declínio / cancelamento</label>
+                        </h4>
+                        <p id="modal-decline-reason-description" className="text-[11px] text-slate-500">
+                          Registre o motivo do encerramento. Fica visível no funil de processos.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DECLINE_REASON_TEMPLATES.map((reason) => (
+                        <button
+                          key={reason}
+                          type="button"
+                          onClick={() => handleDeclineReasonChange(reason)}
+                          className="px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-100 text-[10px] font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                        >
+                          {reason}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      id="modal-decline-reason"
+                      aria-describedby="modal-decline-reason-description"
+                      rows={3}
+                      value={formData.declineReason || ''}
+                      onChange={(event) => handleDeclineReasonChange(event.target.value)}
+                      placeholder="Descreva o motivo do declínio/cancelamento (ex.: banco recusou por comprometimento de renda acima de 30%)…"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 focus:outline-none focus:border-rose-500 focus:bg-white leading-relaxed font-normal"
+                    />
+                    {!formData.declineReason?.trim() && (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                        Recomendado informar o motivo para registro e relatórios.
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span>{formData.declineReason?.length || 0} caracteres</span>
+                      <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Salva com o processo</span>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Card 0: Status da Análise de Crédito (Gatekeeper) */}
                 <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3 relative overflow-hidden">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
