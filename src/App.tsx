@@ -13,7 +13,8 @@ import {
   loadProcesses,
   saveProcesses,
   reloadDefaultProcesses,
-  clearAllProcesses,
+  mergeProcessesLists,
+  StorageScope,
 } from './utils/storage';
 import { Navbar } from './components/Navbar';
 import { HeaderStats } from './components/HeaderStats';
@@ -28,6 +29,7 @@ import { DataManagementModal } from './components/DataManagementModal';
 import { LoginScreen } from './components/LoginScreen';
 import { CREDIT_ANALYSIS_STATUS_CONFIGS, STAGE_CONFIGS } from './utils/constants';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { USE_MOCK_DATA } from './config';
 import {
   syncProcessesToFirestore,
   saveProcessToFirestore,
@@ -37,10 +39,62 @@ import {
   getTenant,
 } from './lib/firebase';
 import { Building2 } from 'lucide-react';
+import { writeAuditLog } from './lib/audit';
 
 function CRMApp() {
   const { user, loading, pendingAccess, logout } = useAuth();
-  const [processes, setProcesses] = useState<ClientProcess[]>(() => loadProcesses());
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-emerald-600 flex items-center justify-center shadow-2xl animate-pulse">
+          <Building2 className="w-7 h-7 text-white" />
+        </div>
+        <p className="text-sm font-semibold text-slate-300">Carregando Morada Crédito Imobiliário...</p>
+      </div>
+    );
+  }
+
+  if (pendingAccess) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4 px-6 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+          <Building2 className="w-7 h-7 text-amber-400" />
+        </div>
+        <div className="space-y-1.5 max-w-sm">
+          <p className="text-sm font-bold text-slate-100">Acesso pendente</p>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Sua conta foi autenticada, mas ainda não está vinculada a nenhuma empresa. Fale com o administrador para liberar seu acesso.
+          </p>
+        </div>
+        <button
+          onClick={logout}
+          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+        >
+          Sair
+        </button>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen />;
+  }
+
+
+  const scope = USE_MOCK_DATA
+    ? { uid: 'mock', tenantId: 'mock', role: 'OWNER' }
+    : user.tenantId
+      ? { uid: user.uid, tenantId: user.tenantId, role: user.role ?? 'ANALYST' }
+      : null;
+  if (!scope) return <LoginScreen />;
+  return <CRMWorkspace key={JSON.stringify(scope)} scope={scope} />;
+}
+
+function CRMWorkspace({ scope }: { scope: StorageScope }) {
+  const { user } = useAuth();
+  const [processes, setProcesses] = useState<ClientProcess[]>(() => loadProcesses(scope));
+  const [tenantName, setTenantName] = useState('');
   const [isDemoTenant, setIsDemoTenant] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'pipeline' | 'table' | 'financial' | 'simulator' | 'whatsapp'>('pipeline');
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
@@ -65,8 +119,12 @@ function CRMApp() {
   }, []);
 
   useEffect(() => {
+    if (USE_MOCK_DATA) {
+      setTenantName(scope.tenantId);
+      setProcesses(reloadDefaultProcesses(scope));
+      return;
+    }
     if (!user?.tenantId) {
-      clearAllProcesses();
       setProcesses([]);
       return;
     }
@@ -82,20 +140,22 @@ function CRMApp() {
           getTenant(tenantId),
         ]);
         if (!isMounted) return;
+        setTenantName(tenant?.name?.trim() || tenantId);
         if (tenant) setIsDemoTenant(tenant.demoMode);
 
-        if (cloudProcesses.length > 0) {
-          saveProcesses(cloudProcesses);
-          setProcesses(cloudProcesses);
-        } else if (tenant?.demoMode) {
-          const demo = reloadDefaultProcesses();
+        if (cloudProcesses === null) return;
+
+        const merged = mergeProcessesLists(scope, loadProcesses(scope), cloudProcesses);
+        if (merged.length > 0 || !tenant?.demoMode) {
+          saveProcesses(scope, merged);
+          setProcesses(merged);
+        } else if (tenant.demoMode) {
+          const demo = reloadDefaultProcesses(scope);
           setProcesses(demo);
-          await syncProcessesToFirestore(tenantId, demo);
-        } else {
-          clearAllProcesses();
-          setProcesses([]);
+          await syncProcessesToFirestore(scope, demo);
         }
       } catch (err) {
+        if (isMounted) setTenantName(tenantId);
         console.warn('Initial cloud sync notice:', err);
       }
     }
@@ -104,8 +164,9 @@ function CRMApp() {
 
     const unsubscribe = subscribeToProcesses(tenantId, viewer, (cloudProcesses) => {
       if (!isMounted) return;
-      saveProcesses(cloudProcesses);
-      setProcesses(cloudProcesses);
+      const merged = mergeProcessesLists(scope, loadProcesses(scope), cloudProcesses);
+      saveProcesses(scope, merged);
+      setProcesses(merged);
     });
 
     return () => {
@@ -150,7 +211,7 @@ function CRMApp() {
         }
         return p;
       });
-      saveProcesses(updated);
+      saveProcesses(scope, updated);
       return updated;
     });
 
@@ -184,7 +245,7 @@ function CRMApp() {
         }
         return p;
       });
-      saveProcesses(updated);
+      saveProcesses(scope, updated);
       return updated;
     });
 
@@ -194,23 +255,39 @@ function CRMApp() {
     showToast(`Análise de crédito atualizada para: ${CREDIT_ANALYSIS_STATUS_CONFIGS[status]?.label || status}`);
   };
 
-  const handleSaveProcess = (updatedProc: ClientProcess) => {
+  const handleSaveProcess = async (updatedProc: ClientProcess) => {
+    const previous = processes.find((process) => process.id === updatedProc.id);
     setProcesses((prev) => {
       const list = prev.map((p) => (p.id === updatedProc.id ? updatedProc : p));
-      saveProcesses(list);
+      saveProcesses(scope, list);
       return list;
     });
-    if (user?.tenantId) saveProcessToFirestore(user.tenantId, updatedProc);
+    if (user?.tenantId && await saveProcessToFirestore(user.tenantId, updatedProc) && previous) {
+      const actions = [
+        previous.clientCpf !== updatedProc.clientCpf ? 'SENSITIVE_EDIT_CPF' as const : null,
+        previous.ownerUid !== updatedProc.ownerUid ? 'OWNER_UID_CHANGE' as const : null,
+      ].filter((action): action is 'SENSITIVE_EDIT_CPF' | 'OWNER_UID_CHANGE' => action !== null);
+      for (const action of actions) {
+        void writeAuditLog({
+            targetTenantId: user.tenantId,
+            actorUid: user.uid,
+            actorRole: user.role,
+            action,
+            resourceId: updatedProc.id,
+            outcome: 'SENSITIVE_ACTION',
+        }).catch(() => console.warn('Falha ao registrar ação sensível na auditoria.'));
+      }
+    }
     showToast(`Processo de ${updatedProc.clientName} salvo com sucesso!`);
   };
 
   const handleDeleteProcess = (processId: string) => {
     setProcesses((prev) => {
       const list = prev.filter((p) => p.id !== processId);
-      saveProcesses(list);
+      saveProcesses(scope, list);
       return list;
     });
-    if (user?.tenantId) deleteProcessFromFirestore(user.tenantId, processId);
+    if (user?.tenantId) deleteProcessFromFirestore(scope, processId);
     showToast('Processo excluído.');
   };
 
@@ -218,7 +295,7 @@ function CRMApp() {
     const withOwner: ClientProcess = { ...newProc, ownerUid: newProc.ownerUid || user?.uid };
     setProcesses((prev) => {
       const updated = [withOwner, ...prev.filter((p) => p.id !== withOwner.id)];
-      saveProcesses(updated);
+      saveProcesses(scope, updated);
       return updated;
     });
     if (user?.tenantId) saveProcessToFirestore(user.tenantId, withOwner);
@@ -248,10 +325,8 @@ function CRMApp() {
   };
 
   const handleResetData = () => {
-    const defaultData = reloadDefaultProcesses();
-    setProcesses(defaultData);
-    if (user?.tenantId) syncProcessesToFirestore(user.tenantId, defaultData).catch(() => {});
-    showToast('Dados de exemplo da Morada Crédito recarregados.');
+    setProcesses(reloadDefaultProcesses(scope));
+    showToast('Dados de exemplo carregados localmente.');
   };
 
   const handleOpenNewProcessWithMonth = (month: string) => {
@@ -262,43 +337,33 @@ function CRMApp() {
     setIsNewProcessModalOpen(true);
   };
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4">
-        <div className="w-14 h-14 rounded-2xl bg-emerald-600 flex items-center justify-center shadow-2xl animate-pulse">
-          <Building2 className="w-7 h-7 text-white" />
-        </div>
-        <p className="text-sm font-semibold text-slate-300">Carregando Morada Crédito Imobiliário...</p>
-      </div>
-    );
-  }
+  const handleExportCSV = () => {
+    exportProcessesToCSV(processes);
+    if (user?.tenantId) {
+      void writeAuditLog({
+        targetTenantId: user.tenantId,
+        actorUid: user.uid,
+        actorRole: user.role,
+        action: 'EXPORT_DATA',
+        resourceId: 'ALL',
+        outcome: 'SENSITIVE_ACTION',
+      }).catch(() => console.warn('Falha ao registrar exportação na auditoria.'));
+    }
+  };
 
-  if (pendingAccess) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4 px-6 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
-          <Building2 className="w-7 h-7 text-amber-400" />
-        </div>
-        <div className="space-y-1.5 max-w-sm">
-          <p className="text-sm font-bold text-slate-100">Acesso pendente</p>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Sua conta foi autenticada, mas ainda não está vinculada a nenhuma empresa. Fale com o administrador para liberar seu acesso.
-          </p>
-        </div>
-        <button
-          onClick={logout}
-          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition cursor-pointer"
-        >
-          Sair
-        </button>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LoginScreen />;
-  }
+  const handleExportJSON = () => {
+    exportProcessesToJSON(processes);
+    if (user?.tenantId) {
+      void writeAuditLog({
+        targetTenantId: user.tenantId,
+        actorUid: user.uid,
+        actorRole: user.role,
+        action: 'EXPORT_DATA',
+        resourceId: 'ALL',
+        outcome: 'SENSITIVE_ACTION',
+      }).catch(() => console.warn('Falha ao registrar exportação na auditoria.'));
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 selection:bg-emerald-500 selection:text-white">
@@ -321,14 +386,15 @@ function CRMApp() {
         selectedMonth={selectedMonth}
         setSelectedMonth={setSelectedMonth}
         availableMonths={availableMonths}
-        onExportCSV={() => exportProcessesToCSV(processes)}
-        onExportJSON={() => exportProcessesToJSON(processes)}
+        onExportCSV={handleExportCSV}
+        onExportJSON={handleExportJSON}
         onResetData={handleResetData}
         onOpenDataManagement={() => setIsDataManagementModalOpen(true)}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         processes={processes}
         isDemo={isDemoTenant}
+        companyName={tenantName}
       />
 
       {/* Main Content Area - Wide Full Canvas */}
@@ -423,11 +489,12 @@ function CRMApp() {
           processes={processes}
           onUpdateProcesses={(updated) => {
             setProcesses(updated);
-            saveProcesses(updated);
-            if (user?.tenantId) syncProcessesToFirestore(user.tenantId, updated).catch(() => {});
+            saveProcesses(scope, updated);
           }}
           onOpenNewProcessWithMonth={handleOpenNewProcessWithMonth}
           showToast={showToast}
+          onExportCSV={handleExportCSV}
+          onExportJSON={handleExportJSON}
         />
       )}
     </div>

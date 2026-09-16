@@ -24,8 +24,6 @@ import {
 import { ClientProcess } from '../types';
 import {
   clearAllProcesses,
-  exportProcessesToCSV,
-  exportProcessesToJSON,
   reloadDefaultProcesses,
   downloadHistorySpreadsheetTemplate,
   parseProcessesFromCSV,
@@ -48,6 +46,8 @@ interface DataManagementModalProps {
   onUpdateProcesses: (processes: ClientProcess[]) => void;
   onOpenNewProcessWithMonth: (month: string) => void;
   showToast: (msg: string) => void;
+  onExportCSV: () => void;
+  onExportJSON: () => void;
 }
 
 export const DataManagementModal: React.FC<DataManagementModalProps> = ({
@@ -57,9 +57,12 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   onUpdateProcesses,
   onOpenNewProcessWithMonth,
   showToast,
+  onExportCSV,
+  onExportJSON,
 }) => {
   const { user } = useAuth();
   const tenantId = user?.tenantId;
+  const scope = user && tenantId ? { uid: user.uid, tenantId, role: user.role ?? 'ANALYST' } : null;
   const viewer = user ? { uid: user.uid, role: user.role ?? 'ANALYST' } : undefined;
 
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
@@ -81,10 +84,10 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   }, [processes, tenantId]);
 
   const handleSyncAllToFirebase = async () => {
-    if (!tenantId) return;
+    if (!tenantId || !scope) return;
     setIsSyncingCloud(true);
     try {
-      const res = await syncProcessesToFirestore(tenantId, processes);
+      const res = await syncProcessesToFirestore(scope, processes);
       if (res.success) {
         showToast(`Sucesso! ${res.count} processos do histórico de 12 meses foram sincronizados na base Firebase.`);
         const meta = await getFirestoreMetadata(tenantId);
@@ -100,7 +103,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleDownloadFromFirebase = async () => {
-    if (!tenantId) return;
+    if (!tenantId || !scope) return;
     setIsSyncingCloud(true);
     try {
       const cloudProcs = await loadProcessesFromFirestore(tenantId, viewer);
@@ -120,7 +123,8 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleClearAll = async () => {
-    clearAllProcesses();
+    if (!scope) return;
+    clearAllProcesses(scope);
     onUpdateProcesses([]);
     if (tenantId) clearAllProcessesInFirestore(tenantId).catch(() => {});
     showToast('Base de dados zerada com sucesso na máquina e na nuvem!');
@@ -129,10 +133,9 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
   };
 
   const handleRestoreSampleData = () => {
-    const defaultData = reloadDefaultProcesses();
-    onUpdateProcesses(defaultData);
-    if (tenantId) syncProcessesToFirestore(tenantId, defaultData).catch(() => {});
-    showToast('Base modelo com histórico anual recarregada e sincronizada!');
+    if (!scope) return;
+    onUpdateProcesses(reloadDefaultProcesses(scope));
+    showToast('Dados de exemplo carregados localmente (não sincronizados).');
     onClose();
   };
 
@@ -146,14 +149,10 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
         const content = event.target?.result as string;
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed)) {
-          if (importMode === 'replace') {
-            onUpdateProcesses(parsed);
-            showToast(`${parsed.length} processos importados substituindo a base!`);
-          } else {
-            const merged = [...processes, ...parsed];
-            onUpdateProcesses(merged);
-            showToast(`${parsed.length} processos adicionados à base atual!`);
-          }
+          const next = importMode === 'replace' ? parsed : [...processes, ...parsed];
+          onUpdateProcesses(next);
+          if (scope) syncProcessesToFirestore(scope, next).catch(() => {});
+          showToast(`${parsed.length} processos importados!`);
           onClose();
         } else {
           setImportError('Arquivo JSON inválido. O arquivo deve conter uma lista de processos.');
@@ -181,14 +180,10 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
           return;
         }
 
-        if (importMode === 'replace') {
-          onUpdateProcesses(result.processes);
-          showToast(`${result.processes.length} processos dos 12 meses importados com sucesso com colunas de Corretor, Mês e Cidade alinhadas!`);
-        } else {
-          const merged = [...processes, ...result.processes];
-          onUpdateProcesses(merged);
-          showToast(`${result.processes.length} processos dos 12 meses adicionados à base com mapeamento inteligente de colunas!`);
-        }
+        const next = importMode === 'replace' ? result.processes : [...processes, ...result.processes];
+        onUpdateProcesses(next);
+        if (scope) syncProcessesToFirestore(scope, next).catch(() => {});
+        showToast(`${result.processes.length} processos importados.`);
         onClose();
       } catch (err: any) {
         setImportError(`Erro ao ler CSV: ${err?.message || 'Arquivo corrompido'}`);
@@ -601,7 +596,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
             
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
-                onClick={() => exportProcessesToCSV(processes)}
+                onClick={onExportCSV}
                 className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 border border-slate-200 cursor-pointer"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
@@ -609,7 +604,7 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
               </button>
 
               <button
-                onClick={() => exportProcessesToJSON(processes)}
+                onClick={onExportJSON}
                 className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5 border border-slate-200 cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5 text-slate-600" />
@@ -653,4 +648,3 @@ export const DataManagementModal: React.FC<DataManagementModalProps> = ({
     </div>
   );
 };
-

@@ -5,60 +5,168 @@
       "description": "Financiamento Imobiliário e Correspondente Bancário process",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "clientName": { "type": "string" },
-        "clientCpf": { "type": "string" },
-        "clientPhone": { "type": "string" },
-        "bank": { "type": "string" },
-        "creditType": { "type": "string" },
-        "propertyValue": { "type": "number" },
-        "financingValue": { "type": "number" },
-        "downPaymentValue": { "type": "number" },
-        "termMonths": { "type": "number" },
-        "interestRateAnnual": { "type": "number" },
-        "amortizationSystem": { "type": "string" },
-        "commissionPercentage": { "type": "number" },
-        "commissionAmount": { "type": "number" },
-        "commissionValue": { "type": "number" },
-        "commissionStatus": { "type": "string" },
-        "partnerRealtorName": { "type": "string" },
-        "partnerRealtorPhone": { "type": "string" },
-        "partnerRealtorCommissionPct": { "type": "number" },
-        "estimatedIssuanceMonth": { "type": "string" },
-        "estimatedIssuanceDate": { "type": "string" },
-        "estimatedDisbursementDate": { "type": "string" },
-        "propertyCity": { "type": "string" },
-        "propertyState": { "type": "string" },
-        "propertyAddress": { "type": "string" },
-        "stage": { "type": "string" },
-        "stageUpdatedAt": { "type": "string" },
-        "priority": { "type": "string" },
-        "syncedAt": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "clientCpf": {
+          "type": "string"
+        },
+        "clientPhone": {
+          "type": "string"
+        },
+        "bank": {
+          "type": "string"
+        },
+        "creditType": {
+          "type": "string"
+        },
+        "propertyValue": {
+          "type": "number"
+        },
+        "financingValue": {
+          "type": "number"
+        },
+        "downPaymentValue": {
+          "type": "number"
+        },
+        "termMonths": {
+          "type": "number"
+        },
+        "interestRateAnnual": {
+          "type": "number"
+        },
+        "amortizationSystem": {
+          "type": "string"
+        },
+        "commissionPercentage": {
+          "type": "number"
+        },
+        "commissionAmount": {
+          "type": "number"
+        },
+        "commissionValue": {
+          "type": "number"
+        },
+        "commissionStatus": {
+          "type": "string"
+        },
+        "partnerRealtorName": {
+          "type": "string"
+        },
+        "partnerRealtorPhone": {
+          "type": "string"
+        },
+        "partnerRealtorCommissionPct": {
+          "type": "number"
+        },
+        "estimatedIssuanceMonth": {
+          "type": "string"
+        },
+        "estimatedIssuanceDate": {
+          "type": "string"
+        },
+        "estimatedDisbursementDate": {
+          "type": "string"
+        },
+        "propertyCity": {
+          "type": "string"
+        },
+        "propertyState": {
+          "type": "string"
+        },
+        "propertyAddress": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "stageUpdatedAt": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "syncedAt": {
+          "type": "string"
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "Firebase Auth UID; analysts can read only processes they own."
+        }
       },
-      "required": ["id", "clientName", "bank", "financingValue", "stage"]
+      "required": [
+        "id",
+        "clientName",
+        "bank",
+        "financingValue",
+        "stage"
+      ]
     },
     "User": {
       "title": "User",
       "description": "Authenticated user profile for CRM access",
       "type": "object",
       "properties": {
-        "uid": { "type": "string" },
-        "email": { "type": "string" },
-        "displayName": { "type": "string" },
-        "role": { "type": "string" },
-        "createdAt": { "type": "string" }
+        "uid": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "OWNER",
+            "ADMIN",
+            "ANALYST"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        }
       },
-      "required": ["uid", "email"]
+      "required": [
+        "uid",
+        "email",
+        "tenantId",
+        "role"
+      ]
+    },
+    "Tenant": {
+      "title": "Tenant",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "demoMode": {
+          "type": "boolean"
+        }
+      },
+      "description": "Company provisioned by a trusted administrative backend."
     }
   },
   "firestore": {
-    "/processes/{processId}": {
-      "schema": "Process",
-      "description": "Shared CRM financing processes"
+    "/tenants/{tenantId}": {
+      "schema": "Tenant",
+      "description": "Tenant metadata. Client writes are denied."
     },
-    "/users/{userId}": {
+    "/tenants/{tenantId}/processes/{processId}": {
+      "schema": "Process",
+      "description": "Tenant-isolated CRM processes. OWNER/ADMIN access their tenant; ANALYST access is restricted by ownerUid. No root /processes collection."
+    },
+    "/users/{uid}": {
       "schema": "User",
-      "description": "User profiles"
+      "description": "Membership provisioned by a trusted administrative backend. tenantId and role determine access; client writes are denied."
     }
   }
 }
