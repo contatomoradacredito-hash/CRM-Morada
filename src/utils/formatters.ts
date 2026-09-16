@@ -1,4 +1,4 @@
-import { BankPartner, ClientProcess, ProcessStage } from '../types';
+import type { ClientProcess } from '../types';
 import { STAGE_CONFIGS } from './constants';
 
 export function formatCurrency(value: number | undefined | null): string {
