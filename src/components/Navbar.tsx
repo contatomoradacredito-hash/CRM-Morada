@@ -43,6 +43,7 @@ interface NavbarProps {
   setSearchQuery: (query: string) => void;
   processes: ClientProcess[];
   isDemo?: boolean;
+  companyName?: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -60,6 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   setSearchQuery,
   processes,
   isDemo,
+  companyName,
 }) => {
   const { user, logout } = useAuth();
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
@@ -85,14 +87,18 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between py-3.5 gap-3 border-b border-slate-800/80 font-bold not-italic">
           {/* Brand Identity */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-lg shadow-emerald-950/40 border border-slate-700/50">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 shrink-0 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-lg shadow-emerald-950/40 border border-slate-700/50">
               <MoradaLogo className="w-full h-full" color="#277D53" />
             </div>
-            <div>
-              <h1 className="font-extrabold text-lg sm:text-xl tracking-tight text-white">
-                Morada Crédito Imobiliário
-              </h1>
+            <div className="min-w-0">
+              {companyName ? (
+                <h1 title={companyName} className="font-extrabold text-lg sm:text-xl tracking-tight text-white truncate max-w-[220px] sm:max-w-[320px]">
+                  {companyName}
+                </h1>
+              ) : (
+                <div role="status" aria-label="Carregando nome da empresa" className="w-40 h-5 rounded bg-slate-700/60 animate-pulse" />
+              )}
               <p className="text-xs text-slate-400 font-normal">
                 Gestão de Processos
               </p>

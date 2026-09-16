@@ -93,6 +93,7 @@ function CRMApp() {
 function CRMWorkspace({ scope }: { scope: StorageScope }) {
   const { user } = useAuth();
   const [processes, setProcesses] = useState<ClientProcess[]>(() => loadProcesses(scope));
+  const [tenantName, setTenantName] = useState('');
   const [isDemoTenant, setIsDemoTenant] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'pipeline' | 'table' | 'financial' | 'simulator' | 'whatsapp'>('pipeline');
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
@@ -118,6 +119,7 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
 
   useEffect(() => {
     if (USE_MOCK_DATA) {
+      setTenantName(scope.tenantId);
       setProcesses(reloadDefaultProcesses(scope));
       return;
     }
@@ -137,6 +139,7 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
           getTenant(tenantId),
         ]);
         if (!isMounted) return;
+        setTenantName(tenant?.name?.trim() || tenantId);
         if (tenant) setIsDemoTenant(tenant.demoMode);
 
         if (cloudProcesses === null) return;
@@ -151,6 +154,7 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
           await syncProcessesToFirestore(scope, demo);
         }
       } catch (err) {
+        if (isMounted) setTenantName(tenantId);
         console.warn('Initial cloud sync notice:', err);
       }
     }
@@ -345,6 +349,7 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
         setSearchQuery={setSearchQuery}
         processes={processes}
         isDemo={isDemoTenant}
+        companyName={tenantName}
       />
 
       {/* Main Content Area - Wide Full Canvas */}
