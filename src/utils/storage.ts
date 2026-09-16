@@ -511,7 +511,7 @@ interface ColumnMap {
  * Dynamically resolves column indices based on header names (case/accent-insensitive).
  * Supports standard template headers, export headers, and custom user spreadsheets.
  */
-function resolveColumnIndices(headers: string[]): { map: ColumnMap; hasHeaders: boolean } {
+export function resolveColumnIndices(headers: string[]): { map: ColumnMap; hasHeaders: boolean } {
   const map: ColumnMap = {
     clientName: -1,
     clientCpf: -1,
@@ -789,6 +789,19 @@ function resolveColumnIndices(headers: string[]): { map: ColumnMap; hasHeaders: 
   return { map, hasHeaders };
 }
 
+export function parseNumber(cell: string | undefined, defaultVal: number = 0): number {
+  if (!cell) return defaultVal;
+  let clean = cell.replace('R$', '').replace(/\s/g, '');
+  // Format 500.000,00 -> 500000.00
+  if (clean.includes('.') && clean.includes(',')) {
+    clean = clean.replace(/\./g, '').replace(',', '.');
+  } else if (clean.includes(',')) {
+    clean = clean.replace(',', '.');
+  }
+  const num = parseFloat(clean);
+  return isNaN(num) ? defaultVal : num;
+}
+
 export function parseProcessesFromCSV(csvText: string): { success: boolean; processes: ClientProcess[]; errors: string[] } {
   try {
     const rawLines = csvText.split(/\r\n|\n|\r/).map((l) => l.trim()).filter((l) => l.length > 0);
@@ -809,18 +822,6 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
     const headerCells = parseCSVLine(headerLine, separator);
     const { map, hasHeaders } = resolveColumnIndices(headerCells);
 
-    const parseNumber = (cell: string | undefined, defaultVal: number = 0): number => {
-      if (!cell) return defaultVal;
-      let clean = cell.replace('R$', '').replace(/\s/g, '');
-      // Format 500.000,00 -> 500000.00
-      if (clean.includes('.') && clean.includes(',')) {
-        clean = clean.replace(/\./g, '').replace(',', '.');
-      } else if (clean.includes(',')) {
-        clean = clean.replace(',', '.');
-      }
-      const num = parseFloat(clean);
-      return isNaN(num) ? defaultVal : num;
-    };
 
     const processes: ClientProcess[] = [];
     const errors: string[] = [];
@@ -885,7 +886,7 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
         : (financingValue * commissionPercentage) / 100;
 
       const rawCommissionStatus = getCell(map.commissionStatus, 'PAGA').toUpperCase();
-      const commissionStatus: any = ['PAGA', 'DISPONIVEL_FATURAMENTO', 'PREVISTA', 'CANCELADA'].includes(
+      const commissionStatus: any = ['PAGA', 'AGUARDANDO_REGISTRO', 'DISPONIVEL_FATURAMENTO', 'PREVISTA', 'CANCELADA'].includes(
         rawCommissionStatus
       )
         ? rawCommissionStatus
@@ -895,6 +896,7 @@ export function parseProcessesFromCSV(csvText: string): { success: boolean; proc
       const STAGE_ALIASES: Record<string, ProcessStage> = {
         PROPERTY_APPRAISAL: 'PROPERTY_VALUATION',
         LEGAL_ANALYSIS: 'LEGAL_COMPLIANCE',
+        CONTRACT_SIGNATUR: 'CONTRACT_SIGNATURE',
       };
       const normalizedStage = STAGE_ALIASES[rawStage] || rawStage;
       const stage: any = [

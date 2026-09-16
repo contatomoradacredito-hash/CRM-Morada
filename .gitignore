@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# AI tooling artifacts — never commit agent config/memory to this repo
+.claude/
+.codex/
+.cursor/
+.maestri/
+AGENTS.md
