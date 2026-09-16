@@ -36,6 +36,7 @@ import { ClientProcess, TenantRole, UserProfile } from '../types';
 import { USE_MOCK_DATA } from '../config';
 import {
   repairProcessFields,
+  StorageScope,
   getDeletedProcessIds,
   markProcessAsDeletedLocally,
 } from '../utils/storage';
@@ -197,50 +198,13 @@ export function sanitizeForFirestore<T>(data: T): T {
 }
 
 /**
- * Merge cloud processes with local processes without losing locally created/updated records
- * and without resurrecting recently deleted processes.
- */
-export function mergeProcessesLists(
-  localList: ClientProcess[],
-  cloudList: ClientProcess[]
-): ClientProcess[] {
-  const deletedIds = getDeletedProcessIds();
-  const map = new Map<string, ClientProcess>();
-
-  // Add all local processes first (ignoring marked deleted)
-  for (const proc of localList) {
-    if (proc && proc.id && !deletedIds.has(proc.id)) {
-      map.set(proc.id, repairProcessFields(proc));
-    }
-  }
-
-  // Merge cloud processes: take cloud version if newer or not present locally
-  for (const rawCloudProc of cloudList) {
-    if (!rawCloudProc || !rawCloudProc.id || deletedIds.has(rawCloudProc.id)) continue;
-    const cloudProc = repairProcessFields(rawCloudProc);
-    const existing = map.get(cloudProc.id);
-    if (!existing) {
-      map.set(cloudProc.id, cloudProc);
-    } else {
-      // Compare timestamps
-      const cloudTime = new Date(cloudProc.stageUpdatedAt || cloudProc.createdAt || 0).getTime();
-      const localTime = new Date(existing.stageUpdatedAt || existing.createdAt || 0).getTime();
-      if (cloudTime >= localTime) {
-        map.set(cloudProc.id, cloudProc);
-      }
-    }
-  }
-
-  return Array.from(map.values()).map(repairProcessFields);
-}
-
-/**
  * Save / sync all processes to Firestore in chunked batches of 200 items (Firestore limit is 500)
  */
 export async function syncProcessesToFirestore(
-  tenantId: string,
+  scope: StorageScope,
   processes: ClientProcess[]
 ): Promise<{ success: boolean; count: number; error?: string }> {
+  const { tenantId } = scope;
   if (USE_MOCK_DATA) return { success: true, count: 0 };
   if (isFirestoreQuotaExhausted) {
     return { success: false, count: 0, error: 'Quota diária do Firestore atingida' };
@@ -251,7 +215,7 @@ export async function syncProcessesToFirestore(
   try {
     const chunkSize = 200;
     let syncedCount = 0;
-    const deletedIds = getDeletedProcessIds();
+    const deletedIds = getDeletedProcessIds(scope);
 
     for (let i = 0; i < processes.length; i += chunkSize) {
       const chunk = processes.slice(i, i + chunkSize);
@@ -319,12 +283,13 @@ export async function saveProcessToFirestore(tenantId: string, process: ClientPr
 /**
  * Permanently delete single process from Firestore and mark locally
  */
-export async function deleteProcessFromFirestore(tenantId: string, processId: string): Promise<boolean> {
+export async function deleteProcessFromFirestore(scope: StorageScope, processId: string): Promise<boolean> {
   if (USE_MOCK_DATA) return true;
+  const { tenantId } = scope;
   if (!tenantId || !processId) return false;
 
   // Register locally so concurrent listener doesn't resurrect it
-  markProcessAsDeletedLocally(processId);
+  markProcessAsDeletedLocally(scope, processId);
 
   if (isFirestoreQuotaExhausted) return false;
   try {
@@ -373,12 +338,12 @@ export async function clearAllProcessesInFirestore(tenantId: string): Promise<bo
 export async function loadProcessesFromFirestore(
   tenantId: string,
   viewer?: ProcessViewer
-): Promise<ClientProcess[]> {
-  if (USE_MOCK_DATA || isFirestoreQuotaExhausted || !tenantId) return [];
+): Promise<ClientProcess[] | null> {
+  if (USE_MOCK_DATA || isFirestoreQuotaExhausted || !tenantId) return null;
   try {
     const querySnapshot = await getDocs(processesQuery(tenantId, viewer));
     const processes: ClientProcess[] = [];
-    const deletedIds = getDeletedProcessIds();
+    const deletedIds = viewer ? getDeletedProcessIds({ tenantId, ...viewer }) : new Set<string>();
 
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data() as any;
@@ -392,7 +357,7 @@ export async function loadProcessesFromFirestore(
       isFirestoreQuotaExhausted = true;
     }
     console.warn('Firestore read status (using cached / local processes):', error?.message || error);
-    return [];
+    return null;
   }
 }
 
@@ -407,11 +372,10 @@ export function subscribeToProcesses(
 ) {
   if (USE_MOCK_DATA || isFirestoreQuotaExhausted || !tenantId) return () => {};
   try {
-    const deletedIds = getDeletedProcessIds();
-
     return onSnapshot(
       processesQuery(tenantId, viewer),
       (querySnapshot) => {
+        const deletedIds = viewer ? getDeletedProcessIds({ tenantId, ...viewer }) : new Set<string>();
         const processes: ClientProcess[] = [];
         querySnapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;

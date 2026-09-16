@@ -18,6 +18,7 @@ import {
   getUserProfile,
 } from '../lib/firebase';
 import { TenantRole } from '../types';
+import { clearLegacyProcessCache, clearProcessCache } from '../utils/storage';
 
 export interface CRMUser {
   uid: string;
@@ -53,10 +54,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [pendingAccess, setPendingAccess] = useState<boolean>(false);
 
   useEffect(() => {
+    clearLegacyProcessCache();
+    let generation = 0;
     const unsubscribe = onAuthStateChanged(auth, async (currentFbUser) => {
+      const currentGeneration = ++generation;
+      setLoading(true);
+      setUser(null);
+      setPendingAccess(false);
       if (currentFbUser) {
         setFirebaseUser(currentFbUser);
         const profile = await getUserProfile(currentFbUser.uid);
+        if (currentGeneration !== generation) return;
         if (profile) {
           setUser({
             uid: currentFbUser.uid,
@@ -88,7 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Erro ao processar retorno do Google Redirect:', err);
     });
 
-    return () => unsubscribe();
+    return () => { generation++; unsubscribe(); };
   }, []);
 
   const login = async (email: string, pass: string) => {
@@ -150,7 +158,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       // ignore
     }
-    await firebaseSignOut(auth).catch(() => {});
+    await firebaseSignOut(auth);
+    if (user?.tenantId) {
+      clearProcessCache({ uid: user.uid, tenantId: user.tenantId, role: user.role ?? 'ANALYST' });
+    }
+    clearLegacyProcessCache();
     setUser(null);
     setFirebaseUser(null);
   };
