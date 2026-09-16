@@ -39,6 +39,7 @@ import {
   getTenant,
 } from './lib/firebase';
 import { Building2 } from 'lucide-react';
+import { writeAuditLog } from './lib/audit';
 
 function CRMApp() {
   const { user, loading, pendingAccess, logout } = useAuth();
@@ -250,13 +251,29 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
     showToast(`Análise de crédito atualizada para: ${CREDIT_ANALYSIS_STATUS_CONFIGS[status]?.label || status}`);
   };
 
-  const handleSaveProcess = (updatedProc: ClientProcess) => {
+  const handleSaveProcess = async (updatedProc: ClientProcess) => {
+    const previous = processes.find((process) => process.id === updatedProc.id);
     setProcesses((prev) => {
       const list = prev.map((p) => (p.id === updatedProc.id ? updatedProc : p));
       saveProcesses(scope, list);
       return list;
     });
-    if (user?.tenantId) saveProcessToFirestore(user.tenantId, updatedProc);
+    if (user?.tenantId && await saveProcessToFirestore(user.tenantId, updatedProc) && previous) {
+      const actions = [
+        previous.clientCpf !== updatedProc.clientCpf ? 'SENSITIVE_EDIT_CPF' as const : null,
+        previous.ownerUid !== updatedProc.ownerUid ? 'OWNER_UID_CHANGE' as const : null,
+      ].filter((action): action is 'SENSITIVE_EDIT_CPF' | 'OWNER_UID_CHANGE' => action !== null);
+      for (const action of actions) {
+        void writeAuditLog({
+            targetTenantId: user.tenantId,
+            actorUid: user.uid,
+            actorRole: user.role,
+            action,
+            resourceId: updatedProc.id,
+            outcome: 'SENSITIVE_ACTION',
+        }).catch(() => console.warn('Falha ao registrar ação sensível na auditoria.'));
+      }
+    }
     showToast(`Processo de ${updatedProc.clientName} salvo com sucesso!`);
   };
 
@@ -316,6 +333,34 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
     setIsNewProcessModalOpen(true);
   };
 
+  const handleExportCSV = () => {
+    exportProcessesToCSV(processes);
+    if (user?.tenantId) {
+      void writeAuditLog({
+        targetTenantId: user.tenantId,
+        actorUid: user.uid,
+        actorRole: user.role,
+        action: 'EXPORT_DATA',
+        resourceId: 'ALL',
+        outcome: 'SENSITIVE_ACTION',
+      }).catch(() => console.warn('Falha ao registrar exportação na auditoria.'));
+    }
+  };
+
+  const handleExportJSON = () => {
+    exportProcessesToJSON(processes);
+    if (user?.tenantId) {
+      void writeAuditLog({
+        targetTenantId: user.tenantId,
+        actorUid: user.uid,
+        actorRole: user.role,
+        action: 'EXPORT_DATA',
+        resourceId: 'ALL',
+        outcome: 'SENSITIVE_ACTION',
+      }).catch(() => console.warn('Falha ao registrar exportação na auditoria.'));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 selection:bg-emerald-500 selection:text-white">
       {/* Toast Notification */}
@@ -337,8 +382,8 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
         selectedMonth={selectedMonth}
         setSelectedMonth={setSelectedMonth}
         availableMonths={availableMonths}
-        onExportCSV={() => exportProcessesToCSV(processes)}
-        onExportJSON={() => exportProcessesToJSON(processes)}
+        onExportCSV={handleExportCSV}
+        onExportJSON={handleExportJSON}
         onResetData={handleResetData}
         onOpenDataManagement={() => setIsDataManagementModalOpen(true)}
         searchQuery={searchQuery}
@@ -443,6 +488,8 @@ function CRMWorkspace({ scope }: { scope: StorageScope }) {
           }}
           onOpenNewProcessWithMonth={handleOpenNewProcessWithMonth}
           showToast={showToast}
+          onExportCSV={handleExportCSV}
+          onExportJSON={handleExportJSON}
         />
       )}
     </div>

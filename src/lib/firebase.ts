@@ -32,6 +32,7 @@ import {
   where,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { logPermissionDenied } from './audit';
 import { ClientProcess, TenantRole, UserProfile } from '../types';
 import { USE_MOCK_DATA } from '../config';
 import {
@@ -106,18 +107,21 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 
 export async function getTenant(tenantId: string): Promise<{ name: string; demoMode: boolean } | null> {
   if (!tenantId) return null;
+  const auditActorUid = auth.currentUser?.uid;
   try {
     const snap = await getDoc(doc(db, 'tenants', tenantId));
     if (!snap.exists()) return null;
     const data = snap.data() as any;
     return { name: data.name || tenantId, demoMode: !!data.demoMode };
-  } catch {
+  } catch (error) {
+    logPermissionDenied(error, auditActorUid, tenantId);
     return null;
   }
 }
 
 export async function getTenantMembers(tenantId: string): Promise<UserProfile[]> {
   if (!tenantId) return [];
+  const auditActorUid = auth.currentUser?.uid;
   try {
     const q = query(collection(db, 'users'), where('tenantId', '==', tenantId));
     const snap = await getDocs(q);
@@ -132,6 +136,7 @@ export async function getTenantMembers(tenantId: string): Promise<UserProfile[]>
       };
     });
   } catch (error: any) {
+    logPermissionDenied(error, auditActorUid, tenantId);
     console.warn('Erro ao carregar membros da empresa:', error?.message || error);
     return [];
   }
@@ -205,6 +210,7 @@ export async function syncProcessesToFirestore(
   processes: ClientProcess[]
 ): Promise<{ success: boolean; count: number; error?: string }> {
   const { tenantId } = scope;
+  const auditActorUid = auth.currentUser?.uid;
   if (USE_MOCK_DATA) return { success: true, count: 0 };
   if (isFirestoreQuotaExhausted) {
     return { success: false, count: 0, error: 'Quota diária do Firestore atingida' };
@@ -241,6 +247,7 @@ export async function syncProcessesToFirestore(
 
     return { success: true, count: syncedCount };
   } catch (error: any) {
+    logPermissionDenied(error, auditActorUid, tenantId);
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
       console.warn('Firestore daily write quota reached; switched seamlessly to local storage.');
@@ -255,6 +262,7 @@ export async function syncProcessesToFirestore(
  * Save single process to Firestore immediately with sanitization
  */
 export async function saveProcessToFirestore(tenantId: string, process: ClientProcess): Promise<boolean> {
+  const auditActorUid = auth.currentUser?.uid;
   if (USE_MOCK_DATA) return true;
   if (isFirestoreQuotaExhausted || !tenantId || !process || !process.id) return false;
   try {
@@ -270,6 +278,7 @@ export async function saveProcessToFirestore(tenantId: string, process: ClientPr
     );
     return true;
   } catch (error: any) {
+    logPermissionDenied(error, auditActorUid, tenantId, process.id);
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
       console.warn('Firestore daily write quota reached; switched seamlessly to local storage.');
@@ -284,6 +293,7 @@ export async function saveProcessToFirestore(tenantId: string, process: ClientPr
  * Permanently delete single process from Firestore and mark locally
  */
 export async function deleteProcessFromFirestore(scope: StorageScope, processId: string): Promise<boolean> {
+  const auditActorUid = auth.currentUser?.uid;
   if (USE_MOCK_DATA) return true;
   const { tenantId } = scope;
   if (!tenantId || !processId) return false;
@@ -297,6 +307,7 @@ export async function deleteProcessFromFirestore(scope: StorageScope, processId:
     await deleteDoc(processRef);
     return true;
   } catch (error: any) {
+    logPermissionDenied(error, auditActorUid, tenantId, processId);
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
     } else {
@@ -310,6 +321,7 @@ export async function deleteProcessFromFirestore(scope: StorageScope, processId:
  * Clear all process documents from Firestore (e.g., when user explicitly wipes dataset)
  */
 export async function clearAllProcessesInFirestore(tenantId: string): Promise<boolean> {
+  const auditActorUid = auth.currentUser?.uid;
   if (USE_MOCK_DATA) return true;
   if (isFirestoreQuotaExhausted || !tenantId) return false;
   try {
@@ -327,6 +339,7 @@ export async function clearAllProcessesInFirestore(tenantId: string): Promise<bo
     }
     return true;
   } catch (error: any) {
+    logPermissionDenied(error, auditActorUid, tenantId);
     console.warn('Firestore clear all notice:', error?.message || error);
     return false;
   }
@@ -339,6 +352,7 @@ export async function loadProcessesFromFirestore(
   tenantId: string,
   viewer?: ProcessViewer
 ): Promise<ClientProcess[] | null> {
+  const auditActorUid = auth.currentUser?.uid;
   if (USE_MOCK_DATA || isFirestoreQuotaExhausted || !tenantId) return null;
   try {
     const querySnapshot = await getDocs(processesQuery(tenantId, viewer));
@@ -353,6 +367,7 @@ export async function loadProcessesFromFirestore(
     });
     return processes;
   } catch (error: any) {
+    logPermissionDenied(error, auditActorUid, tenantId);
     if (isQuotaError(error)) {
       isFirestoreQuotaExhausted = true;
     }
@@ -370,6 +385,7 @@ export function subscribeToProcesses(
   onUpdate: (processes: ClientProcess[]) => void,
   onError?: (err: any) => void
 ) {
+  const auditActorUid = auth.currentUser?.uid;
   if (USE_MOCK_DATA || isFirestoreQuotaExhausted || !tenantId) return () => {};
   try {
     return onSnapshot(
@@ -386,6 +402,7 @@ export function subscribeToProcesses(
         onUpdate(processes);
       },
       (error: any) => {
+        logPermissionDenied(error, auditActorUid, tenantId);
         if (isQuotaError(error)) {
           isFirestoreQuotaExhausted = true;
         }
@@ -394,6 +411,7 @@ export function subscribeToProcesses(
       }
     );
   } catch (err: any) {
+    logPermissionDenied(err, auditActorUid, tenantId);
     if (isQuotaError(err)) {
       isFirestoreQuotaExhausted = true;
     }
@@ -412,6 +430,7 @@ export async function getFirestoreMetadata(tenantId: string): Promise<{
   totalDocuments: number;
   error?: string;
 }> {
+  const auditActorUid = auth.currentUser?.uid;
   const meta = {
     connected: false,
     databaseId: firebaseConfig.firestoreDatabaseId || '(default)',
@@ -426,10 +445,10 @@ export async function getFirestoreMetadata(tenantId: string): Promise<{
     meta.connected = true;
     meta.totalDocuments = snap.docs.filter((d) => !d.data()?.isDeleted).length;
   } catch (e: any) {
+    logPermissionDenied(e, auditActorUid, tenantId);
     meta.connected = false;
     meta.error = e?.message || String(e);
   }
 
   return meta;
 }
-

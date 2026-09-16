@@ -10,7 +10,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "import:history": "tsx scripts/import-history.ts",
+    "prune:audit": "tsx scripts/prune-audit-log.ts",
     "test:import": "tsx --test scripts/history-import.test.ts",
+    "test:audit": "tsx --test scripts/audit.test.ts",
     "typecheck:import": "tsc -p scripts/tsconfig.json"
   },
   "dependencies": {
